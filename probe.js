@@ -1,6 +1,6 @@
 // Diagnostic: opens Gemini with your saved session and reports what it finds.
 // Does NOT send anything. Sign in if prompted, then watch the console.
-import { chromium } from "playwright";
+import { chromium } from "playwright-core";
 import { config } from "./config.js";
 
 let browser;

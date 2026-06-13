@@ -1,4 +1,10 @@
 // All tunable settings live here. Edit selectors if Gemini's UI changes.
+//
+// When running the COMPILED binary, these defaults are baked in. To change them
+// without recompiling, drop a `config.json` next to the binary with just the
+// keys you want to override (deep-merged over the defaults below).
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 export const config = {
   // Where Gemini lives.
@@ -7,6 +13,25 @@ export const config = {
   // Folders (relative to this project).
   inputDir: "./images",
   outputDir: "./output",
+
+  // Source for the "system" mode (run with --system <name>). The page lists
+  // games; for each one missing fanart we grab its boxart, generate, and upload.
+  // With no --system argument, the local inputDir above is used instead.
+  contribute: {
+    baseUrl: "https://rgs-retro.ddns.net/contribute/system/",
+    // API returning the games list for a system (system name is appended).
+    apiUrl: "https://rgs-retro.ddns.net/api/catalog/contribute/games/",
+    // Base for media paths from the API (e.g. boxart "dos/media/box2d/x.jpg").
+    // Leave "" to auto-detect by probing a few common bases.
+    mediaBaseUrl: "",
+    // Only process games whose fanart is missing (skip ones that already have it).
+    onlyMissingFanart: true,
+    // Max number of games to process in one run (0 = no limit). Handy for testing.
+    limit: 0,
+    // false = generate + save to output/ only (review, upload manually).
+    // true  = also upload the generated fanart back into the game's row.
+    autoUpload: false,
+  },
 
   // We attach to a REAL Chrome you launch yourself (so Google's login works).
   // `npm run chrome` starts it with this debugging port and profile dir.
@@ -20,7 +45,7 @@ export const config = {
     "1920x620. With no text and no japanese text, and no game screens or " +
     "arcade machine.",
 
-  // Target output size. Set resize.enabled = false to keep Gemini's raw output.
+  // Output is always saved as JPEG at this quality, resized to width x height.
   resize: {
     enabled: true,
     width: 1920,
@@ -28,7 +53,16 @@ export const config = {
     // "cover" = fill the frame and crop overflow (no distortion, may crop edges).
     // "contain" = fit whole image inside, padding the rest. "fill" = stretch.
     fit: "cover",
+    // JPEG quality (1-100).
+    quality: 90,
   },
+
+  // Output file format/extension. Saved as JPEG regardless of the source type.
+  outputFormat: "jpg",
+
+  // Remove Gemini's watermark (bottom-right) before resizing/encoding.
+  // Uses @pilio/gemini-watermark-remover (reverse alpha-blending, not AI).
+  removeWatermark: true,
 
   // Image file extensions to pick up from inputDir.
   extensions: [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"],
@@ -84,3 +118,24 @@ export const config = {
       'button[aria-label*="exporter" i], button[aria-label*="export" i], button[aria-label*="plus d\'options" i], button[aria-label*="more options" i]',
   },
 };
+
+// Deep-merge plain objects from `source` into `target` (arrays/scalars replace).
+function deepMerge(target, source) {
+  for (const [k, v] of Object.entries(source)) {
+    if (v && typeof v === "object" && !Array.isArray(v) && typeof target[k] === "object") {
+      deepMerge(target[k], v);
+    } else {
+      target[k] = v;
+    }
+  }
+}
+
+// Apply ./config.json (next to the binary / cwd) over the defaults, if present.
+try {
+  const overrides = JSON.parse(
+    readFileSync(path.join(process.cwd(), "config.json"), "utf8")
+  );
+  deepMerge(config, overrides);
+} catch {
+  // No config.json (or unreadable/invalid) — just use the defaults above.
+}

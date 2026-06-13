@@ -1,16 +1,20 @@
 {
   "name": "geminibatch",
   "version": "1.0.0",
-  "description": "Batch-process a folder of images through the Gemini web chat (browser automation, no API) and save the generated fanart.",
+  "description": "Batch-process images through the Gemini web chat (browser automation, no API) and save the generated fanart. Pure-JS so it compiles to a standalone binary.",
   "type": "module",
   "scripts": {
     "chrome": "bash start-chrome.sh",
     "start": "node index.js",
     "probe": "node probe.js",
-    "postinstall": "playwright install chromium"
+    "build": "bun run build:linux && bun run build:win",
+    "build:linux": "bun build ./index.js --compile --target=bun-linux-x64 --external chromium-bidi --outfile dist/geminibatch-linux",
+    "build:win": "bun build ./index.js --compile --target=bun-windows-x64 --external chromium-bidi --outfile dist/geminibatch-win.exe"
   },
   "dependencies": {
-    "playwright": "^1.49.0",
-    "sharp": "^0.33.5"
+    "@pilio/gemini-watermark-remover": "^1.0.21",
+    "chromium-bidi": "^16.0.1",
+    "jimp": "^0.22.12",
+    "playwright-core": "^1.49.0"
   }
 }

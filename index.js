@@ -1,11 +1,39 @@
-import { chromium } from "playwright";
-import sharp from "sharp";
+import { chromium } from "playwright-core";
+import Jimp from "jimp";
+import { removeWatermarkFromImageData } from "@pilio/gemini-watermark-remover";
 import { config } from "./config.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(`[${new Date().toLocaleTimeString()}]`, ...a);
+
+// --system <name> (or -s <name>, --system=<name>, or a bare first argument).
+// When set, pull games from the contribute site instead of the local folder.
+function parseSystemArg(args) {
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === "--system" || args[i] === "-s") && args[i + 1]) return args[i + 1];
+    if (args[i].startsWith("--system=")) return args[i].slice("--system=".length);
+  }
+  // Bare positional, but skip a value that belongs to another flag (e.g. --limit 10).
+  const valueFlags = new Set(["--system", "-s", "--limit", "-l"]);
+  const positional = args.find((a, i) => !a.startsWith("-") && !valueFlags.has(args[i - 1]));
+  return positional || null;
+}
+const SYSTEM = parseSystemArg(process.argv.slice(2));
+
+// --limit <n> (or -l <n>, --limit=<n>): cap how many games to process this run.
+// Overrides config.contribute.limit. 0 = no limit.
+function parseLimitArg(args) {
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === "--limit" || args[i] === "-l") && args[i + 1] !== undefined)
+      return Number(args[i + 1]);
+    if (args[i].startsWith("--limit=")) return Number(args[i].slice("--limit=".length));
+  }
+  return null;
+}
+const LIMIT = parseLimitArg(process.argv.slice(2));
+if (LIMIT !== null && Number.isFinite(LIMIT)) config.contribute.limit = LIMIT;
 
 
 async function listInputImages() {
@@ -60,16 +88,41 @@ async function downloadGenerated(page, tmpPath) {
   return tmpPath;
 }
 
-// Resize/crop the downloaded file to the target size (or copy as-is).
+// Remove Gemini's watermark in place, operating on the Jimp bitmap (raw RGBA).
+async function stripWatermark(image) {
+  const { width, height, data } = image.bitmap;
+  const { imageData, meta } = await removeWatermarkFromImageData(
+    { data: new Uint8ClampedArray(data), width, height },
+    { adaptiveMode: "auto" }
+  );
+  image.bitmap.data = Buffer.from(imageData.data);
+  image.bitmap.width = imageData.width;
+  image.bitmap.height = imageData.height;
+  return meta;
+}
+
+// Optionally de-watermark, then resize/crop to target size, save as JPEG.
 async function saveOutput(srcPath, outPath) {
-  if (config.resize.enabled) {
-    // sharp infers the output format from outPath's extension.
-    await sharp(srcPath)
-      .resize(config.resize.width, config.resize.height, { fit: config.resize.fit })
-      .toFile(outPath);
-  } else {
+  if (!config.removeWatermark && !config.resize.enabled) {
     await fs.copyFile(srcPath, outPath);
+    return;
   }
+  const image = await Jimp.read(srcPath);
+
+  if (config.removeWatermark) {
+    const meta = await stripWatermark(image);
+    log(`  watermark: ${meta.applied ? "removed" : `skipped (${meta.skipReason})`}`);
+  }
+
+  if (config.resize.enabled) {
+    const { width: w, height: h, fit } = config.resize;
+    if (fit === "contain") image.contain(w, h);
+    else if (fit === "fill") image.resize(w, h); // stretch to exact size
+    else image.cover(w, h); // "cover": fill + crop overflow (default)
+  }
+
+  image.quality(config.resize.quality);
+  await image.writeAsync(outPath);
 }
 
 async function attachImage(page, imgPath) {
@@ -144,11 +197,8 @@ async function processOne(page, imgPath, tmpPath) {
   return downloadGenerated(page, tmpPath);
 }
 
-async function main() {
-  await fs.mkdir(config.outputDir, { recursive: true });
-  await fs.mkdir(config.inputDir, { recursive: true });
-
-  // Attach to the real Chrome you launched with `npm run chrome`.
+// Attach to the real Chrome you launched with `npm run chrome`.
+async function connectChrome() {
   let browser;
   try {
     browser = await chromium.connectOverCDP(`http://localhost:${config.cdpPort}`);
@@ -157,17 +207,7 @@ async function main() {
     log("Start it first in another terminal:  npm run chrome");
     process.exit(1);
   }
-
-  const context = browser.contexts()[0];
-  // Reuse the Gemini tab if open, otherwise open one.
-  let page = context.pages().find((p) => p.url().includes("gemini.google.com"));
-  if (!page) {
-    page = await context.newPage();
-    await page.goto(config.url, { waitUntil: "domcontentloaded" });
-  }
-  await page.bringToFront();
-
-  // Disconnecting (not closing your Chrome) on Ctrl+C.
+  // Ctrl+C disconnects (leaves YOUR Chrome open and running).
   const shutdown = async () => {
     try {
       await browser.close();
@@ -176,9 +216,20 @@ async function main() {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  return browser;
+}
 
-  // Detect login by the ABSENCE of a sign-in button (Gemini shows the prompt
-  // box even when logged out).
+// Find/open the Gemini tab and make sure we're logged in.
+async function openGeminiPage(browser) {
+  const context = browser.contexts()[0];
+  let page = context.pages().find((p) => p.url().includes("gemini.google.com"));
+  if (!page) {
+    page = await context.newPage();
+    await page.goto(config.url, { waitUntil: "domcontentloaded" });
+  }
+  await page.bringToFront();
+
+  // Logged in = NO sign-in button (Gemini shows the prompt box even logged out).
   const isLoggedIn = async () => {
     try {
       if (!page.url().includes("gemini.google.com")) return false;
@@ -196,16 +247,43 @@ async function main() {
   };
 
   if (!(await isLoggedIn())) {
-    log("Not logged in. Sign into Gemini in your Chrome window, then it'll continue.");
-    const deadline = Date.now() + Number.MAX_SAFE_INTEGER;
-    while (!(await isLoggedIn()) && Date.now() < deadline) await sleep(2000);
-    log("✓ Logged in. Continuing.");
+    log("Not logged into Gemini. Sign in in your Chrome window; it'll continue.");
+    while (!(await isLoggedIn())) await sleep(2000);
+    log("✓ Gemini ready.");
   }
+  return page;
+}
 
+// Generate fanart from one source image and save it to outputDir/<outName><ext>.
+// Returns the saved path, or null if the output already existed (skipped).
+async function generateAndSave(geminiPage, sourcePath, outName, ext, outDir = config.outputDir) {
+  await fs.mkdir(outDir, { recursive: true });
+  // Output is always JPEG regardless of the source extension.
+  const outExt = config.outputFormat ? `.${config.outputFormat}` : ext;
+  const outPath = path.join(outDir, `${outName}${config.outputSuffix}${outExt}`);
+  if (config.skipExisting) {
+    const exists = await fs.access(outPath).then(() => true).catch(() => false);
+    if (exists) {
+      log(`  skip ${outName} — output exists`);
+      return outPath;
+    }
+  }
+  const tmpPath = path.join(outDir, `.${outName}.download`);
+  try {
+    await processOne(geminiPage, sourcePath, tmpPath);
+    await saveOutput(tmpPath, outPath);
+    log(`  ✓ saved ${outPath}`);
+    return outPath;
+  } finally {
+    await fs.rm(tmpPath, { force: true }).catch(() => {});
+  }
+}
+
+// ---- Mode 1: local images directory (the original behaviour) ----
+async function runLocalMode(geminiPage) {
   const images = await listInputImages();
   if (images.length === 0) {
     log(`No images found in ${config.inputDir}. Drop some in and re-run.`);
-    await browser.close();
     return;
   }
   log(`Found ${images.length} image(s) to process.`);
@@ -213,40 +291,34 @@ async function main() {
   let ok = 0;
   let failed = 0;
   for (const [i, imgPath] of images.entries()) {
-    const { name, ext } = path.parse(imgPath); // name = no extension
-    // Same filename as the source image (plus optional suffix), in outputDir.
-    const outPath = path.join(config.outputDir, `${name}${config.outputSuffix}${ext}`);
-
-    if (config.skipExisting) {
-      const exists = await fs
-        .access(outPath)
-        .then(() => true)
-        .catch(() => false);
-      if (exists) {
-        log(`(${i + 1}/${images.length}) skip ${name} — output exists`);
-        continue;
-      }
-    }
-
+    const { name, ext } = path.parse(imgPath);
     log(`(${i + 1}/${images.length}) processing ${name}`);
-    const tmpPath = path.join(config.outputDir, `.${name}.download`);
     try {
-      await processOne(page, imgPath, tmpPath);
-      await saveOutput(tmpPath, outPath);
-      await fs.rm(tmpPath, { force: true });
-      log(`  ✓ saved ${outPath}`);
+      await generateAndSave(geminiPage, imgPath, name, ext);
       ok++;
     } catch (err) {
-      await fs.rm(tmpPath, { force: true }).catch(() => {});
       log(`  ✗ failed ${name}: ${err.message}`);
       failed++;
     }
-
     if (i < images.length - 1) await sleep(config.timeouts.betweenImages);
   }
-
   log(`Done. ${ok} succeeded, ${failed} failed.`);
-  // Disconnect from CDP. This leaves YOUR Chrome window open and running.
+}
+
+async function main() {
+  await fs.mkdir(config.outputDir, { recursive: true });
+  await fs.mkdir(config.inputDir, { recursive: true });
+
+  const browser = await connectChrome();
+  const geminiPage = await openGeminiPage(browser);
+
+  if (SYSTEM) {
+    const { runSystemMode } = await import("./system-mode.js");
+    await runSystemMode({ browser, geminiPage, system: SYSTEM, generateAndSave });
+  } else {
+    await runLocalMode(geminiPage);
+  }
+
   await browser.close();
 }
 

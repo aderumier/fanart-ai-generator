@@ -1,6 +1,6 @@
 node_modules/
 
-# Chrome profiles created by `npm run chrome` (contain your login session)
+# Chrome profiles created by the chrome launcher (contain your login session)
 .gemini-chrome/
 .gemini-profile/
 
@@ -10,3 +10,9 @@ output/
 # Your input images (keep the folder, not its contents)
 images/*
 !images/.gitkeep
+
+# Compiled standalone binaries (build with `npm run build`)
+dist/
+
+# Local config overrides
+config.json

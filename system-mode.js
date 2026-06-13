@@ -1,0 +1,146 @@
+// System mode: pull games from the contribute API, and for each game missing
+// fanart, download its boxart → generate fanart via Gemini → save to output/.
+// (Optionally upload it back to the game's row when contribute.autoUpload=true.)
+import { config } from "./config.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const log = (...a) => console.log(`[${new Date().toLocaleTimeString()}]`, ...a);
+
+const siteOrigin = () => new URL(config.contribute.apiUrl).origin;
+
+// Open / reuse a tab on the site and land on the system page (ensures we're on
+// the authenticated origin so fetches carry the Discord-login cookies).
+async function openContributePage(browser, system) {
+  const context = browser.contexts()[0];
+  let page = context.pages().find((p) => p.url().includes(siteOrigin().split("//")[1]));
+  if (!page) page = await context.newPage();
+  const target = config.contribute.baseUrl.replace(/\/$/, "") + "/" + system;
+  await page.goto(target, { waitUntil: "domcontentloaded" }).catch(() => {});
+  await page.bringToFront();
+  return page;
+}
+
+// Fetch JSON from a same-origin URL using the page's cookies. Returns the parsed
+// body, or null if it wasn't JSON (e.g. a login redirect / HTML page).
+async function fetchJson(page, url) {
+  return page.evaluate(async (u) => {
+    try {
+      const r = await fetch(u, { credentials: "include" });
+      const text = await r.text();
+      try {
+        return { ok: r.ok, json: JSON.parse(text) };
+      } catch {
+        return { ok: false, json: null }; // HTML (not logged in / error)
+      }
+    } catch {
+      return { ok: false, json: null };
+    }
+  }, url);
+}
+
+// Wait until the games API returns JSON (i.e. logged into Discord).
+async function fetchGamesWhenReady(page, apiUrl) {
+  for (let i = 0; i < 600; i++) {
+    const res = await fetchJson(page, apiUrl);
+    if (res.ok && res.json && Array.isArray(res.json.games)) return res.json.games;
+    if (i === 0) log("Waiting for API access — log into Discord in the window if asked…");
+    await sleep(2000);
+  }
+  throw new Error("Could not read the games API (login or URL issue).");
+}
+
+// Figure out the base URL that serves media paths, by probing the first boxart.
+async function resolveMediaBase(page, sampleRelPath) {
+  if (config.contribute.mediaBaseUrl) return config.contribute.mediaBaseUrl.replace(/\/$/, "") + "/";
+  const origin = siteOrigin();
+  const candidates = ["/", "/media/", "/data/", "/roms/", "/catalog/", "/static/"];
+  for (const c of candidates) {
+    const base = origin + c;
+    const url = base + encodeURI(sampleRelPath);
+    const ok = await page.evaluate(async (u) => {
+      try {
+        const r = await fetch(u, { credentials: "include" });
+        return r.ok && (r.headers.get("content-type") || "").startsWith("image");
+      } catch {
+        return false;
+      }
+    }, url);
+    if (ok) {
+      log(`Media base resolved: ${base}`);
+      return base;
+    }
+  }
+  throw new Error(
+    "Could not resolve the media base URL. Set contribute.mediaBaseUrl in config.js."
+  );
+}
+
+// Download a same-origin image to a local file via the page's cookies.
+async function downloadToFile(page, url, destPath) {
+  const base64 = await page.evaluate(async (u) => {
+    const r = await fetch(u, { credentials: "include" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const buf = new Uint8Array(await r.arrayBuffer());
+    let s = "";
+    for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
+    return btoa(s);
+  }, url);
+  await fs.writeFile(destPath, Buffer.from(base64, "base64"));
+}
+
+export async function runSystemMode({ browser, geminiPage, system, generateAndSave }) {
+  log(`System mode: ${system}`);
+  const page = await openContributePage(browser, system);
+
+  const apiUrl = config.contribute.apiUrl.replace(/\/$/, "") + "/" + system;
+  const games = await fetchGamesWhenReady(page, apiUrl);
+  log(`API returned ${games.length} game(s).`);
+
+  // Which games need fanart?
+  let todo = games.filter((g) => {
+    if (!g.boxart) return false; // nothing to generate from
+    if (config.contribute.onlyMissingFanart && g.fanart) return false;
+    return true;
+  });
+  const total = todo.length;
+  if (config.contribute.limit > 0) todo = todo.slice(0, config.contribute.limit);
+  log(
+    `${total} game(s) need fanart` +
+      (todo.length < total ? `; processing first ${todo.length} (limit).` : ".")
+  );
+  if (todo.length === 0) return;
+
+  const mediaBase = await resolveMediaBase(page, todo[0].boxart);
+
+  // Generated fanart goes into output/<system>/.
+  const outDir = path.join(config.outputDir, system);
+  await fs.mkdir(outDir, { recursive: true });
+
+  let ok = 0;
+  let failed = 0;
+  for (const [i, g] of todo.entries()) {
+    const ext = path.extname(g.boxart) || ".jpg";
+    const outName = path.basename(g.boxart, ext); // matches media naming
+    log(`(${i + 1}/${todo.length}) ${g.name}  [${outName}]`);
+
+    const boxTmp = path.join(outDir, `.${outName}.boxart${ext}`);
+    try {
+      await downloadToFile(page, mediaBase + encodeURI(g.boxart), boxTmp);
+      const outPath = await generateAndSave(geminiPage, boxTmp, outName, ext, outDir);
+      if (config.contribute.autoUpload) {
+        log("  (autoUpload is on, but the upload step isn't wired yet — skipping)");
+      }
+      void outPath;
+      ok++;
+    } catch (err) {
+      log(`  ✗ failed ${outName}: ${err.message}`);
+      failed++;
+    } finally {
+      await fs.rm(boxTmp, { force: true }).catch(() => {});
+    }
+    if (i < todo.length - 1) await sleep(config.timeouts.betweenImages);
+  }
+  log(`Done. ${ok} succeeded, ${failed} failed.`);
+}

@@ -1,7 +1,7 @@
 // Inspects the CURRENT Gemini conversation to understand how generated images
 // and their download controls are structured. Run AFTER a generation exists in
 // the open chat. Does not send anything.
-import { chromium } from "playwright";
+import { chromium } from "playwright-core";
 import { config } from "./config.js";
 
 const browser = await chromium.connectOverCDP(`http://localhost:${config.cdpPort}`);
