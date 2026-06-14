@@ -14,3 +14,7 @@ images/*
 
 # Local config overrides
 config.json
+
+# Built release packages (produced by the CI workflow or locally)
+*.zip
+staging/
