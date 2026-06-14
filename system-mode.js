@@ -10,6 +10,10 @@ const log = (...a) => console.log(`[${new Date().toLocaleTimeString()}]`, ...a);
 
 const siteOrigin = () => new URL(config.contribute.apiUrl).origin;
 
+// Source media to generate the fanart from: prefer the boxart, but fall back to
+// the game's generic "image" field when no boxart is available.
+const sourceMedia = (g) => g.boxart || g.image || null;
+
 // Open / reuse a tab on the site and land on the system page (ensures we're on
 // the authenticated origin so fetches carry the Discord-login cookies).
 async function openContributePage(browser, system) {
@@ -144,7 +148,7 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
 
   // Which games need fanart?
   let todo = games.filter((g) => {
-    if (!g.boxart) return false; // nothing to generate from
+    if (!sourceMedia(g)) return false; // no boxart or image to generate from
     if (config.contribute.onlyMissingFanart && g.fanart) return false;
     if (alreadyUploaded.has(g.id)) return false; // already uploaded earlier
     return true;
@@ -157,8 +161,8 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
   );
   if (todo.length === 0) return;
 
-  // Probe with several boxarts so one missing file doesn't break detection.
-  const mediaBase = await resolveMediaBase(page, todo.slice(0, 8).map((g) => g.boxart));
+  // Probe with several sample media so one missing file doesn't break detection.
+  const mediaBase = await resolveMediaBase(page, todo.slice(0, 8).map(sourceMedia));
 
   // Generated fanart goes into output/<system>/; downloaded boxart into tmpDir.
   const outDir = path.join(config.outputDir, system);
@@ -168,13 +172,14 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
   let ok = 0;
   let failed = 0;
   for (const [i, g] of todo.entries()) {
-    const ext = path.extname(g.boxart) || ".jpg";
-    const outName = path.basename(g.boxart, ext); // matches media naming
-    log(`(${i + 1}/${todo.length}) ${g.name}  [${outName}]`);
+    const src = sourceMedia(g); // boxart, or the image field when no boxart
+    const ext = path.extname(src) || ".jpg";
+    const outName = path.basename(src, ext); // matches media naming
+    log(`(${i + 1}/${todo.length}) ${g.name}  [${outName}]${g.boxart ? "" : " (image)"}`);
 
     const boxTmp = path.join(config.tmpDir, `${outName}.boxart${ext}`);
     try {
-      await downloadToFile(page, mediaBase + encodeURI(g.boxart), boxTmp);
+      await downloadToFile(page, mediaBase + encodeURI(src), boxTmp);
       const outPath = await generateAndSave(geminiPage, boxTmp, outName, ext, outDir);
       if (config.contribute.autoUpload) {
         await uploadFanart(page, {
