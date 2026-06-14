@@ -218,12 +218,18 @@ async function attachImage(page, imgPath) {
   await page.keyboard.press("Escape").catch(() => {});
   await sleep(400);
 
-  // Fast path: a file input already exists in the DOM.
-  const existing = page.locator(config.selectors.fileInput);
-  if (await existing.count()) {
-    await existing.first().setInputFiles(imgPath);
-    return;
-  }
+  const fileInput = page.locator(config.selectors.fileInput);
+
+  // Most reliable upload path: set files straight onto the <input type=file>.
+  // Unlike the OS file-chooser event (which intermittently hangs in setFiles),
+  // this resolves as soon as the input accepts the file. Try it whenever an
+  // input is present in the DOM.
+  const trySetInput = async () => {
+    if (!(await fileInput.count())) return false;
+    await fileInput.first().setInputFiles(imgPath, { timeout: 10000 });
+    return true;
+  };
+  if (await trySetInput()) return;
 
   const re = new RegExp(config.selectors.filesMenuItem, "i");
   // The "Fichiers" command: ONLY a visible menuitem/option/button with that text.
@@ -236,15 +242,12 @@ async function attachImage(page, imgPath) {
 
   // Opening the import menu is flaky (the menu can be slow, or the click can land
   // before it's ready). Retry a few times — this is all before generation, so it
-  // costs no quota. Between tries, dismiss any half-open menu and re-check whether
-  // a file input appeared in the meantime.
+  // costs no quota.
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      if (await existing.count()) {
-        await existing.first().setInputFiles(imgPath);
-        return;
-      }
+      if (await trySetInput()) return;
+
       // Open "Importation et outils", then click the visible "Fichiers" item.
       // Filter to VISIBLE: the per-message "more options" menu trigger echoes the
       // prompt in its aria-label (e.g. "...the attached picture...") and so matches
@@ -257,13 +260,18 @@ async function attachImage(page, imgPath) {
       await filesItem.waitFor({ state: "visible", timeout: 5000 });
 
       const [chooser] = await Promise.all([
-        page.waitForEvent("filechooser", { timeout: 15000 }),
+        page.waitForEvent("filechooser", { timeout: 10000 }),
         filesItem.click(),
       ]);
-      await chooser.setFiles(imgPath);
+      // Short setFiles timeout: the chooser path sometimes hangs, so fail fast
+      // and let the retry (or the direct-input fallback below) take over.
+      await chooser.setFiles(imgPath, { timeout: 8000 });
       return;
     } catch (err) {
       lastErr = err;
+      // The menu may have revealed a file <input> even if the chooser path
+      // failed/hung — setting files on it directly is the reliable fallback.
+      if (await trySetInput().catch(() => false)) return;
       if (attempt < 3) {
         log(`  attach retry ${attempt}/2 (${err.message.split("\n")[0]})`);
         await page.keyboard.press("Escape").catch(() => {});
