@@ -6,13 +6,11 @@ node_modules/
 
 # Generated output and download temp files
 output/
+tmp/
 
 # Your input images (keep the folder, not its contents)
 images/*
 !images/.gitkeep
-
-# Compiled standalone binaries (build with `npm run build`)
-dist/
 
 # Local config overrides
 config.json

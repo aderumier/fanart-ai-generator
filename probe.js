@@ -5,7 +5,7 @@ import { config } from "./config.js";
 
 let browser;
 try {
-  browser = await chromium.connectOverCDP(`http://localhost:${config.cdpPort}`);
+  browser = await chromium.connectOverCDP(`http://${config.cdpHost}:${config.cdpPort}`);
 } catch {
   console.error(`Could not connect to Chrome on port ${config.cdpPort}.`);
   console.error("Start it first:  npm run chrome");

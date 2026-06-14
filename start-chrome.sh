@@ -14,6 +14,7 @@ echo "→ Log into Gemini in the window that opens, then leave it open."
 
 exec google-chrome \
   --remote-debugging-port="$PORT" \
+  --remote-allow-origins=* \
   --user-data-dir="$PROFILE" \
   --no-first-run \
   --no-default-browser-check \

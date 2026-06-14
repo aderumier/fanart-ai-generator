@@ -8,6 +8,49 @@ import path from "node:path";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(`[${new Date().toLocaleTimeString()}]`, ...a);
 
+// Thrown when Gemini reports the daily image quota is exhausted. The `.quota`
+// flag lets the run loops recognise it across module boundaries and stop.
+class QuotaReachedError extends Error {
+  constructor(message = "Daily image quota reached") {
+    super(message);
+    this.name = "QuotaReachedError";
+    this.quota = true;
+  }
+}
+
+// Normalise for matching: lowercase + fold all the apostrophe-like glyphs Gemini
+// may render (curly ' ‘, modifier ʼ, prime ′, backtick) down to a straight ',
+// so a pattern with "can't" matches a rendered "can't". Also collapse whitespace.
+const normalizeText = (s) =>
+  (s || "")
+    .toLowerCase()
+    .replace(/[‘’ʼ′`´]/g, "'")
+    .replace(/\s+/g, " ");
+
+// The latest model response text (scoped to the main chat area, last chunk).
+async function responseText(page) {
+  return page
+    .evaluate(() => (document.querySelector("main") || document.body).innerText || "")
+    .catch(() => "");
+}
+
+// Text added since `baseline` was captured. Gemini's /app frequently reloads the
+// PREVIOUS conversation, so the page can still show an earlier game's response;
+// we only ever want to act on what appeared after the current prompt was sent.
+function newSinceBaseline(full, baseline) {
+  const nf = normalizeText(full);
+  const nb = normalizeText(baseline || "");
+  return nf.startsWith(nb) ? nf.slice(nb.length) : nf;
+}
+
+// First configured phrase in `patterns` that appears in the NEW response text
+// (anything added since `baseline`), or null.
+async function matchResponse(page, patterns, baseline) {
+  if (!patterns || patterns.length === 0) return null;
+  const text = newSinceBaseline(await responseText(page), baseline);
+  return patterns.find((p) => text.includes(normalizeText(p))) || null;
+}
+
 // --system <name> (or -s <name>, --system=<name>, or a bare first argument).
 // When set, pull games from the contribute site instead of the local folder.
 function parseSystemArg(args) {
@@ -52,14 +95,21 @@ async function countDownloadButtons(page) {
   return page.locator(config.selectors.downloadButton).count();
 }
 
-// Wait until a NEW download button appears (i.e. generation completed).
-async function waitForGeneration(page, before, timeout) {
+// Wait until a NEW download button appears (i.e. generation completed). `baseline`
+// is the response text captured just before the prompt was sent, so we only react
+// to quota/skip phrases in text that appeared afterwards.
+async function waitForGeneration(page, before, timeout, baseline) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if ((await countDownloadButtons(page)) > before) {
       await sleep(1500); // let it settle
       return true;
     }
+    // Gemini answered with text instead of an image. Either we're out of quota
+    // (stop the whole run) or it refused/clarified this one (skip to next).
+    if (await matchResponse(page, config.quotaMessages, baseline)) throw new QuotaReachedError();
+    const skip = await matchResponse(page, config.skipMessages, baseline);
+    if (skip) throw new Error(`skipped — Gemini responded: "${skip}"`);
     await sleep(2000);
   }
   return false;
@@ -181,6 +231,10 @@ async function processOne(page, imgPath, tmpPath) {
   await box.click();
   await box.fill(config.prompt);
 
+  // Snapshot the visible response text BEFORE sending, so quota/skip detection
+  // only considers what Gemini adds in reply to THIS prompt (not a restored chat).
+  const baseline = await responseText(page);
+
   // 3. Send (button if present, else Enter).
   const sendBtn = page.locator(config.selectors.sendButton).first();
   if (await sendBtn.count()) {
@@ -191,8 +245,14 @@ async function processOne(page, imgPath, tmpPath) {
   log("  prompt sent, waiting for generated image…");
 
   // 4. Wait for generation to finish, then download via Gemini's own button.
-  const done = await waitForGeneration(page, before, config.timeouts.generation);
-  if (!done) throw new Error("timed out waiting for a generated image");
+  const done = await waitForGeneration(page, before, config.timeouts.generation, baseline);
+  if (!done) {
+    // Dump what Gemini actually said in reply to this prompt, so unknown
+    // quota/refusal wording can be copied into config.quotaMessages/skipMessages.
+    const tail = newSinceBaseline(await responseText(page), baseline).slice(-600).trim();
+    log(`  (no image) Gemini's reply text was:\n----\n${tail}\n----`);
+    throw new Error("timed out waiting for a generated image");
+  }
   log("  generated, downloading…");
   return downloadGenerated(page, tmpPath);
 }
@@ -200,10 +260,12 @@ async function processOne(page, imgPath, tmpPath) {
 // Attach to the real Chrome you launched with `npm run chrome`.
 async function connectChrome() {
   let browser;
+  const cdpUrl = `http://${config.cdpHost}:${config.cdpPort}`;
   try {
-    browser = await chromium.connectOverCDP(`http://localhost:${config.cdpPort}`);
-  } catch {
-    log(`Could not connect to Chrome on port ${config.cdpPort}.`);
+    browser = await chromium.connectOverCDP(cdpUrl);
+  } catch (err) {
+    log(`Could not connect to Chrome at ${cdpUrl}`);
+    log(`reason: ${err.message}`);
     log("Start it first in another terminal:  npm run chrome");
     process.exit(1);
   }
@@ -268,7 +330,8 @@ async function generateAndSave(geminiPage, sourcePath, outName, ext, outDir = co
       return outPath;
     }
   }
-  const tmpPath = path.join(outDir, `.${outName}.download`);
+  await fs.mkdir(config.tmpDir, { recursive: true });
+  const tmpPath = path.join(config.tmpDir, `${outName}.download`);
   try {
     await processOne(geminiPage, sourcePath, tmpPath);
     await saveOutput(tmpPath, outPath);
@@ -297,6 +360,10 @@ async function runLocalMode(geminiPage) {
       await generateAndSave(geminiPage, imgPath, name, ext);
       ok++;
     } catch (err) {
+      if (err.quota) {
+        log(`  ⛔ ${err.message} — stopping (daily quota reached).`);
+        break;
+      }
       log(`  ✗ failed ${name}: ${err.message}`);
       failed++;
     }

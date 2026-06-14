@@ -77,6 +77,33 @@ async function resolveMediaBase(page, sampleRelPath) {
   );
 }
 
+// Upload a generated fanart file back to the site (multipart, same-origin so the
+// session cookie rides along). Mirrors the site's own /api/media/upload call.
+async function uploadFanart(page, { filePath, filename, system, gameId }) {
+  const b64 = (await fs.readFile(filePath)).toString("base64");
+  const res = await page.evaluate(
+    async ({ b64, filename, system, gameId, url }) => {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const fd = new FormData();
+      fd.append("file", new Blob([bytes], { type: "image/jpeg" }), filename);
+      fd.append("system", system);
+      fd.append("game_id", gameId);
+      fd.append("media_type", "fanart");
+      try {
+        const r = await fetch(url, { method: "POST", body: fd, credentials: "include" });
+        return { ok: r.ok, status: r.status, body: (await r.text()).slice(0, 200) };
+      } catch (e) {
+        return { ok: false, status: 0, body: String(e) };
+      }
+    },
+    { b64, filename, system, gameId, url: config.contribute.uploadUrl }
+  );
+  if (!res.ok) throw new Error(`upload HTTP ${res.status}: ${res.body}`);
+  return res;
+}
+
 // Download a same-origin image to a local file via the page's cookies.
 async function downloadToFile(page, url, destPath) {
   const base64 = await page.evaluate(async (u) => {
@@ -98,10 +125,22 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
   const games = await fetchGamesWhenReady(page, apiUrl);
   log(`API returned ${games.length} game(s).`);
 
+  // Game ids that already have an uploaded (pending-review) fanart — skip these
+  // so we don't regenerate/re-upload them on a later run.
+  const pending = await fetchJson(page, config.contribute.pendingUrl);
+  const alreadyUploaded = new Set(
+    (pending.json?.pending_media || [])
+      .filter((m) => m.system === system && m.fieldname === "fanart")
+      .map((m) => m.game_id)
+  );
+  if (alreadyUploaded.size)
+    log(`${alreadyUploaded.size} game(s) already have an uploaded fanart — skipping those.`);
+
   // Which games need fanart?
   let todo = games.filter((g) => {
     if (!g.boxart) return false; // nothing to generate from
     if (config.contribute.onlyMissingFanart && g.fanart) return false;
+    if (alreadyUploaded.has(g.id)) return false; // already uploaded earlier
     return true;
   });
   const total = todo.length;
@@ -114,9 +153,10 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
 
   const mediaBase = await resolveMediaBase(page, todo[0].boxart);
 
-  // Generated fanart goes into output/<system>/.
+  // Generated fanart goes into output/<system>/; downloaded boxart into tmpDir.
   const outDir = path.join(config.outputDir, system);
   await fs.mkdir(outDir, { recursive: true });
+  await fs.mkdir(config.tmpDir, { recursive: true });
 
   let ok = 0;
   let failed = 0;
@@ -125,16 +165,26 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
     const outName = path.basename(g.boxart, ext); // matches media naming
     log(`(${i + 1}/${todo.length}) ${g.name}  [${outName}]`);
 
-    const boxTmp = path.join(outDir, `.${outName}.boxart${ext}`);
+    const boxTmp = path.join(config.tmpDir, `${outName}.boxart${ext}`);
     try {
       await downloadToFile(page, mediaBase + encodeURI(g.boxart), boxTmp);
       const outPath = await generateAndSave(geminiPage, boxTmp, outName, ext, outDir);
       if (config.contribute.autoUpload) {
-        log("  (autoUpload is on, but the upload step isn't wired yet — skipping)");
+        await uploadFanart(page, {
+          filePath: outPath,
+          filename: path.basename(outPath),
+          system,
+          gameId: g.id,
+        });
+        log("  ⬆ uploaded fanart");
       }
-      void outPath;
       ok++;
     } catch (err) {
+      if (err.quota) {
+        // `finally` below still removes boxTmp before we leave the loop.
+        log(`  ⛔ ${err.message} — stopping (daily quota reached).`);
+        break;
+      }
       log(`  ✗ failed ${outName}: ${err.message}`);
       failed++;
     } finally {

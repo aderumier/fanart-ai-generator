@@ -11,29 +11,25 @@ Two sources:
   generate fanart, and save it to `output/<system>/`.
 
 It works by attaching (over the Chrome DevTools Protocol) to a **real Chrome you
-launch yourself**, so Google and Discord logins work normally. It's pure
-JavaScript, so it also compiles to a **standalone binary** (Windows + Linux).
+launch yourself**, so Google and Discord logins work normally.
+
+Runs on **Node.js ≥ 18** (Windows, Linux, macOS).
 
 ---
 
-## Option A — run from source (Node ≥ 18)
+## Setup
+
+Install [Node.js](https://nodejs.org), then once:
 
 ```bash
 npm install
 ```
 
-## Option B — standalone binary (no Node needed)
-
-Download/build `geminibatch-linux` or `geminibatch-win.exe` (see *Building*
-below) and run it directly. Put a `config.json` next to it to override defaults.
-
----
-
 ## 1. Launch Chrome with a debug port
 
 The script attaches to your own Chrome. Start it (keep the window open):
 
-- **Linux:** `npm run chrome`  (or `bash start-chrome.sh`)
+- **Linux/macOS:** `npm run chrome`  (or `bash start-chrome.sh`)
 - **Windows:** double-click `start-chrome.bat`
 
 A Chrome window opens on Gemini. **Log into Google** here. For system mode, also
@@ -45,18 +41,20 @@ in `./.gemini-chrome/` and reused on later runs.
 **Local mode** — drop images in `./images/`, then:
 
 ```bash
-npm start                 # from source
-./geminibatch-linux       # or the binary
+npm start                 # Linux/macOS
+run.bat                   # Windows
 ```
 
 **System mode:**
 
 ```bash
-node index.js --system dos              # from source
-./geminibatch-linux --system dos        # or the binary
-geminibatch-win.exe --system dos        # Windows
+# Linux/macOS
+node index.js --system dos
+node index.js --system dos --limit 10
 
-node index.js --system dos --limit 10   # cap how many games this run
+# Windows
+run.bat --system dos
+run.bat --system dos --limit 10
 ```
 
 `--system <name>` / `-s <name>`, `--limit <n>` / `-l <n>` (0 = no limit).
@@ -68,8 +66,9 @@ Already-saved files are skipped, so runs are **resumable**.
 
 ## Configuration
 
-Defaults live in [`config.js`](config.js). For the **binary**, drop a
-`config.json` next to it with only the keys you want to change (deep-merged):
+Defaults live in [`config.js`](config.js). You can also drop a `config.json` in
+the project folder with only the keys you want to change (deep-merged over the
+defaults — handy for editing settings without touching the source):
 
 ```json
 {
@@ -85,21 +84,6 @@ Key settings: `prompt`, `removeWatermark` (strips Gemini's bottom-right mark via
 `outputFormat` (`"jpg"`), `newChatPerImage`, `skipExisting`, `contribute.*`, and
 the brittle `selectors` block (update if Gemini's UI changes). Selectors already
 cover French + English.
-
----
-
-## Building the standalone binaries
-
-Requires [Bun](https://bun.sh). From this folder:
-
-```bash
-npm run build         # builds both into ./dist
-npm run build:linux   # ./dist/geminibatch-linux
-npm run build:win     # ./dist/geminibatch-win.exe  (cross-compiles from Linux)
-```
-
-The binary bundles the Bun runtime + all JS deps. It does **not** bundle a
-browser — it attaches to the Chrome you launch in step 1.
 
 ---
 

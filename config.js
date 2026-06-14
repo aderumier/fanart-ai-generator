@@ -13,6 +13,8 @@ export const config = {
   // Folders (relative to this project).
   inputDir: "./images",
   outputDir: "./output",
+  // Scratch dir for downloaded source images (boxart) before processing.
+  tmpDir: "./tmp",
 
   // Source for the "system" mode (run with --system <name>). The page lists
   // games; for each one missing fanart we grab its boxart, generate, and upload.
@@ -24,17 +26,25 @@ export const config = {
     // Base for media paths from the API (e.g. boxart "dos/media/box2d/x.jpg").
     // Leave "" to auto-detect by probing a few common bases.
     mediaBaseUrl: "",
+    // Endpoint that accepts the generated fanart (multipart upload).
+    uploadUrl: "https://rgs-retro.ddns.net/api/media/upload",
+    // Endpoint listing already-uploaded (pending-review) media, so we can skip
+    // games we already uploaded fanart for on a previous run.
+    pendingUrl: "https://rgs-retro.ddns.net/api/media/pending",
     // Only process games whose fanart is missing (skip ones that already have it).
     onlyMissingFanart: true,
     // Max number of games to process in one run (0 = no limit). Handy for testing.
     limit: 0,
     // false = generate + save to output/ only (review, upload manually).
-    // true  = also upload the generated fanart back into the game's row.
-    autoUpload: false,
+    // true  = also upload the generated fanart back to the game (media_type=fanart).
+    autoUpload: true,
   },
 
   // We attach to a REAL Chrome you launch yourself (so Google's login works).
   // `npm run chrome` starts it with this debugging port and profile dir.
+  // Use 127.0.0.1 (not "localhost") — Chrome binds IPv4 only, and some runtimes
+  // resolve "localhost" to IPv6 ::1 first, which fails to connect.
+  cdpHost: "127.0.0.1",
   cdpPort: 9222,
   chromeBinary: "google-chrome",
   chromeUserDataDir: "./.gemini-chrome",
@@ -66,6 +76,32 @@ export const config = {
 
   // Image file extensions to pick up from inputDir.
   extensions: [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"],
+
+  // Phrases Gemini shows when you've hit the daily image-generation quota.
+  // If the latest response contains any of these (case-insensitive substring),
+  // the run STOPS immediately — there's no point retrying the rest today.
+  // Add more variants here as you encounter them.
+  quotaMessages: [
+    "I can't create more images for you today",
+    "I can't create more images for you right now",
+    "can't create more images",
+    // French equivalents (Gemini follows the UI language).
+    "Je ne peux pas créer d'images supplémentaires aujourd'hui",
+    "je ne peux pas créer plus d'images",
+    "plus d'images pour aujourd'hui",
+  ],
+
+  // Phrases that mean THIS image won't be generated, but the run should continue.
+  // If the latest response matches any of these, we SKIP to the next game right
+  // away instead of waiting out the full generation timeout. (Not a quota stop.)
+  skipMessages: [
+    "I can create images of people",
+    "Je peux créer des images de personnes",
+    // Refuses to depict real/public figures (e.g. boxart with a celebrity).
+    "I can't depict some public figures",
+    "depict some public figures",
+    "Je ne peux pas représenter certaines personnalités publiques",
+  ],
 
   // Timing (milliseconds).
   timeouts: {

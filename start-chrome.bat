@@ -15,6 +15,6 @@ if not exist %CHROME% set CHROME="%LOCALAPPDATA%\Google\Chrome\Application\chrom
 echo Starting Chrome on debug port %PORT% with profile %PROFILE%
 echo Log into Gemini in the window that opens, then leave it open.
 
-%CHROME% --remote-debugging-port=%PORT% --user-data-dir="%PROFILE%" --no-first-run --no-default-browser-check "https://gemini.google.com/app"
+%CHROME% --remote-debugging-port=%PORT% --remote-allow-origins=* --user-data-dir="%PROFILE%" --no-first-run --no-default-browser-check "https://gemini.google.com/app"
 
 endlocal

@@ -4,7 +4,7 @@
 import { chromium } from "playwright-core";
 import { config } from "./config.js";
 
-const browser = await chromium.connectOverCDP(`http://localhost:${config.cdpPort}`);
+const browser = await chromium.connectOverCDP(`http://${config.cdpHost}:${config.cdpPort}`);
 const ctx = browser.contexts()[0];
 const page =
   ctx.pages().find((p) => p.url().includes("gemini.google.com")) || ctx.pages()[0];
