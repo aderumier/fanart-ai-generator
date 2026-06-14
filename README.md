@@ -87,6 +87,47 @@ cover French + English.
 
 ---
 
+## Quota limit & refusals
+
+When Gemini answers with text instead of an image, the run reacts based on two
+phrase lists in [`config.js`](config.js):
+
+- **`quotaMessages`** — the daily image-generation quota is exhausted (e.g.
+  *"I can't create more images for you today"*). The whole run **stops**
+  immediately; there's no point retrying the rest today. Re-run tomorrow — it
+  resumes (already-saved files are skipped).
+- **`skipMessages`** — Gemini refused *this* image but the run should continue
+  (e.g. *"I can create images of people…"*, *"…I can't depict some public
+  figures…"*). That game is **skipped right away** (no waiting out the timeout)
+  and the next one starts.
+
+Matching is case-insensitive, folds typographic apostrophes (so `can't` matches
+`can't`), and only looks at text Gemini added in reply to the current prompt.
+
+If a run gets stuck waiting and then logs a refusal you don't recognise, copy
+the exact wording from the timeout dump:
+
+```
+(no image) Gemini's reply text was:
+----
+…the text Gemini actually sent…
+----
+```
+
+and add a distinctive substring of it to `quotaMessages` (to stop) or
+`skipMessages` (to skip) — in `config.js`, or via a `config.json` override:
+
+```json
+{
+  "skipMessages": ["depict some public figures", "I can create images of people"]
+}
+```
+
+> Note: a `config.json` array **replaces** the default list rather than
+> appending — include the defaults you still want when overriding.
+
+---
+
 ## Diagnostics
 
 ```bash
