@@ -17,9 +17,55 @@ Runs on **Node.js ≥ 18** (Windows, Linux, macOS).
 
 ---
 
+## Requirements
+
+You need two things on your machine:
+
+| Dependency | Why | Version |
+| --- | --- | --- |
+| **Node.js** (with `npm`) | runs the script | **≥ 18** (LTS recommended) |
+| **Google Chrome** | the script attaches to it over the DevTools Protocol; logins happen in this real browser | any recent stable |
+
+> The Node packages it uses — `playwright-core`, `jimp`,
+> `@pilio/gemini-watermark-remover`, `chromium-bidi` — are pure JavaScript and
+> installed by `npm install`. There is **no compiler/native build step** and
+> **no Playwright browser download** (it drives *your* Chrome), so nothing else
+> is required.
+
+### Install Node.js
+
+- **Any OS:** download the LTS installer from [nodejs.org](https://nodejs.org).
+- **Linux (Debian/Ubuntu):**
+  ```bash
+  sudo apt install nodejs npm        # may be older than 18; check `node -v`
+  # newer (NodeSource):
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs
+  ```
+- **Linux (Fedora):** `sudo dnf install nodejs`
+- **macOS (Homebrew):** `brew install node`
+- **Windows:** `winget install OpenJS.NodeJS.LTS` (or `choco install nodejs-lts`)
+
+Check it: `node -v` should print `v18` or higher.
+
+### Install Google Chrome
+
+- **Windows / macOS:** [google.com/chrome](https://www.google.com/chrome/)
+  (or `winget install Google.Chrome` / `brew install --cask google-chrome`).
+- **Linux (Debian/Ubuntu):**
+  ```bash
+  wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+  sudo apt install ./google-chrome-stable_current_amd64.deb
+  ```
+- **Linux (Fedora):** `sudo dnf install google-chrome-stable` (Google repo).
+
+If your Chrome binary isn't named `google-chrome` on the `PATH` (e.g. Chromium,
+or a custom path), set `chromeBinary` in [`config.js`](config.js) accordingly.
+
+---
+
 ## Setup
 
-Install [Node.js](https://nodejs.org), then once:
+With the requirements above installed, fetch the Node packages once:
 
 ```bash
 npm install
