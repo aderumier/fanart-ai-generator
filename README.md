@@ -90,6 +90,12 @@ A Chrome window opens on Gemini. **Log into Google** here. For system mode, also
 visit the contribute site once and **log in with Discord**. The session is saved
 in `./.gemini-chrome/` and reused on later runs.
 
+> ⚠️ **Set the Gemini interface language to English.** The script finds the
+> upload/menu buttons by their labels, which are matched in English (French also
+> works). With another UI language (e.g. Danish) those buttons won't be found and
+> uploads will fail. Change it in your Google Account → *Data & privacy* →
+> *Language*, or at <https://myaccount.google.com/language>, then reload Gemini.
+
 ## 2. Run
 
 **Local mode** — drop images in `./images/`, then:
