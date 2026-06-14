@@ -51,29 +51,35 @@ async function fetchGamesWhenReady(page, apiUrl) {
   throw new Error("Could not read the games API (login or URL issue).");
 }
 
-// Figure out the base URL that serves media paths, by probing the first boxart.
-async function resolveMediaBase(page, sampleRelPath) {
+// Figure out the base URL that serves media paths, by probing sample boxarts.
+// Tries several samples per candidate base: a single game whose boxart 404s (or
+// a transient fetch failure) must not break detection for the whole system.
+async function resolveMediaBase(page, sampleRelPaths) {
   if (config.contribute.mediaBaseUrl) return config.contribute.mediaBaseUrl.replace(/\/$/, "") + "/";
   const origin = siteOrigin();
-  const candidates = ["/", "/media/", "/data/", "/roms/", "/catalog/", "/static/"];
+  const candidates = ["/media/", "/", "/data/", "/roms/", "/catalog/", "/static/"];
+  const samples = (Array.isArray(sampleRelPaths) ? sampleRelPaths : [sampleRelPaths]).filter(Boolean);
   for (const c of candidates) {
     const base = origin + c;
-    const url = base + encodeURI(sampleRelPath);
-    const ok = await page.evaluate(async (u) => {
-      try {
-        const r = await fetch(u, { credentials: "include" });
-        return r.ok && (r.headers.get("content-type") || "").startsWith("image");
-      } catch {
-        return false;
+    for (const rel of samples) {
+      const url = base + encodeURI(rel);
+      const ok = await page.evaluate(async (u) => {
+        try {
+          const r = await fetch(u, { credentials: "include" });
+          return r.ok && (r.headers.get("content-type") || "").startsWith("image");
+        } catch {
+          return false;
+        }
+      }, url);
+      if (ok) {
+        log(`Media base resolved: ${base}`);
+        return base;
       }
-    }, url);
-    if (ok) {
-      log(`Media base resolved: ${base}`);
-      return base;
     }
   }
   throw new Error(
-    "Could not resolve the media base URL. Set contribute.mediaBaseUrl in config.js."
+    `Could not resolve the media base URL from ${samples.length} sample(s). ` +
+      "Set contribute.mediaBaseUrl in config.js (e.g. the site origin + \"/media/\")."
   );
 }
 
@@ -151,7 +157,8 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
   );
   if (todo.length === 0) return;
 
-  const mediaBase = await resolveMediaBase(page, todo[0].boxart);
+  // Probe with several boxarts so one missing file doesn't break detection.
+  const mediaBase = await resolveMediaBase(page, todo.slice(0, 8).map((g) => g.boxart));
 
   // Generated fanart goes into output/<system>/; downloaded boxart into tmpDir.
   const outDir = path.join(config.outputDir, system);
