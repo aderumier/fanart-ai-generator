@@ -197,7 +197,14 @@ async function attachImage(page, imgPath) {
     .first();
 
   // Open "Importation et outils", then click the visible "Fichiers" item.
-  await page.locator(config.selectors.importButton).first().click();
+  // Filter to VISIBLE: the per-message "more options" menu trigger echoes the
+  // prompt in its aria-label (e.g. "...the attached picture...") and so matches
+  // our "attach"/"tools" substrings, but it stays hidden until hover.
+  await page
+    .locator(config.selectors.importButton)
+    .filter({ visible: true })
+    .first()
+    .click();
   await filesItem.waitFor({ state: "visible", timeout: 5000 });
 
   const [chooser] = await Promise.all([
