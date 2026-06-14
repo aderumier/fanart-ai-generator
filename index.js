@@ -263,9 +263,16 @@ async function attachImage(page, imgPath) {
         page.waitForEvent("filechooser", { timeout: 10000 }),
         filesItem.click(),
       ]);
-      // Short setFiles timeout: the chooser path sometimes hangs, so fail fast
-      // and let the retry (or the direct-input fallback below) take over.
-      await chooser.setFiles(imgPath, { timeout: 8000 });
+      // Gemini detaches/re-renders the file <input> right after accepting the
+      // file, so chooser.setFiles often never resolves and times out EVEN THOUGH
+      // the upload succeeded. Treat a setFiles timeout as success (don't retry /
+      // re-attach); only a different error means the chooser path truly failed.
+      try {
+        await chooser.setFiles(imgPath, { timeout: 8000 });
+      } catch (err) {
+        if (!/timeout/i.test(err.message)) throw err;
+        log("  upload: setFiles timed out (file already accepted) — continuing");
+      }
       return;
     } catch (err) {
       lastErr = err;
