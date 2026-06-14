@@ -351,11 +351,20 @@ async function connectChrome() {
     log("Start it first in another terminal:  npm run chrome");
     process.exit(1);
   }
-  // Ctrl+C disconnects (leaves YOUR Chrome open and running).
+  // Ctrl+C disconnects (leaves YOUR Chrome open and running) and exits Node.
+  // Disconnecting from a CDP connection can hang, which would otherwise leave
+  // the process alive after Ctrl+C — so force-exit if cleanup takes too long,
+  // and exit immediately on a second Ctrl+C.
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) process.exit(130); // second Ctrl+C: don't wait
+    shuttingDown = true;
+    const force = setTimeout(() => process.exit(130), 3000);
+    force.unref();
     try {
       await browser.close();
     } catch {}
+    clearTimeout(force);
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
