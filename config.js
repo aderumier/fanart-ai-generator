@@ -85,6 +85,9 @@ export const config = {
     "I can't create more images for you today",
     "I can't create more images for you right now",
     "can't create more images",
+    "I can't generate more images for you today",
+    "can't generate more images",
+    "come back tomorrow and we can make more",
     // French equivalents (Gemini follows the UI language).
     "Je ne peux pas créer d'images supplémentaires aujourd'hui",
     "je ne peux pas créer plus d'images",
