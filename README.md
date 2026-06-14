@@ -140,7 +140,9 @@ defaults — handy for editing settings without touching the source):
 ```
 
 Key settings: `prompt`, `removeWatermark` (strips Gemini's bottom-right mark via
-`@pilio/gemini-watermark-remover` before resizing), `resize` (size/quality/`fit`),
+`@pilio/gemini-watermark-remover` before resizing), `cropWatermarkIfNotRemoved`
+(when that detector can't remove the mark, crop off the right strip that contains
+it instead of leaving it in — on by default), `resize` (size/quality/`fit`),
 `outputFormat` (`"jpg"`), `newChatPerImage`, `skipExisting`, `contribute.*`, and
 the brittle `selectors` block (update if Gemini's UI changes). Selectors already
 cover French + English.

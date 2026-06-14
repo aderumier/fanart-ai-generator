@@ -74,6 +74,11 @@ export const config = {
   // Uses @pilio/gemini-watermark-remover (reverse alpha-blending, not AI).
   removeWatermark: true,
 
+  // Fallback when removeWatermark can't detect/remove the mark: crop off the
+  // right strip of the image that contains the (bottom-right) watermark, so it
+  // never survives into the output. The remaining image is then resized as usual.
+  cropWatermarkIfNotRemoved: true,
+
   // Image file extensions to pick up from inputDir.
   extensions: [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"],
 

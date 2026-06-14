@@ -1,6 +1,10 @@
 import { chromium } from "playwright-core";
 import Jimp from "jimp";
-import { removeWatermarkFromImageData } from "@pilio/gemini-watermark-remover";
+import {
+  removeWatermarkFromImageData,
+  detectWatermarkConfig,
+  calculateWatermarkPosition,
+} from "@pilio/gemini-watermark-remover";
 import { config } from "./config.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -151,6 +155,18 @@ async function stripWatermark(image) {
   return meta;
 }
 
+// Crop off the right strip of the image that holds the (bottom-right) watermark,
+// using the library's own size→position math. Returns how many pixels were cut.
+function cropOutWatermark(image) {
+  const { width, height } = image.bitmap;
+  const cfg = detectWatermarkConfig(width, height);
+  const pos = calculateWatermarkPosition(width, height, cfg);
+  const pad = Math.round(cfg.logoSize * 0.25); // small safety margin
+  const keep = Math.max(1, Math.min(width, pos.x - pad)); // everything left of the mark
+  image.crop(0, 0, keep, height);
+  return width - keep;
+}
+
 // Optionally de-watermark, then resize/crop to target size, save as JPEG.
 async function saveOutput(srcPath, outPath) {
   if (!config.removeWatermark && !config.resize.enabled) {
@@ -161,7 +177,14 @@ async function saveOutput(srcPath, outPath) {
 
   if (config.removeWatermark) {
     const meta = await stripWatermark(image);
-    log(`  watermark: ${meta.applied ? "removed" : `skipped (${meta.skipReason})`}`);
+    if (meta.applied) {
+      log("  watermark: removed");
+    } else if (config.cropWatermarkIfNotRemoved) {
+      const cut = cropOutWatermark(image);
+      log(`  watermark: not removed (${meta.skipReason}) — cropped ${cut}px off the right`);
+    } else {
+      log(`  watermark: skipped (${meta.skipReason})`);
+    }
   }
 
   if (config.resize.enabled) {
