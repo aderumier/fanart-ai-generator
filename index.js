@@ -123,23 +123,38 @@ async function waitForGeneration(page, before, timeout, baseline) {
 // and capture the file via the browser download event. Returns the temp path.
 async function downloadGenerated(page, tmpPath) {
   const dl = page.locator(config.selectors.downloadButton).last();
-  await dl.scrollIntoViewIfNeeded().catch(() => {});
 
-  // If it's not directly clickable, try opening the export/more-options menu.
-  if (!(await dl.isVisible().catch(() => false))) {
-    const menu = page.locator(config.selectors.exportMenu).last();
-    if (await menu.count()) {
-      await menu.click().catch(() => {});
-      await sleep(600);
+  // The download click is flaky (it can open a menu instead of firing the
+  // download, or fire nothing). Retry — the image already exists, so this never
+  // re-generates and costs no quota.
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await dl.scrollIntoViewIfNeeded().catch(() => {});
+      // If it's not directly clickable, try opening the export/more-options menu.
+      if (!(await dl.isVisible().catch(() => false))) {
+        const menu = page.locator(config.selectors.exportMenu).last();
+        if (await menu.count()) {
+          await menu.click().catch(() => {});
+          await sleep(600);
+        }
+      }
+      const [download] = await Promise.all([
+        page.waitForEvent("download", { timeout: 30000 }),
+        dl.click({ timeout: 8000 }),
+      ]);
+      await download.saveAs(tmpPath);
+      return tmpPath;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 3) {
+        log(`  download retry ${attempt}/2 (${err.message.split("\n")[0]})`);
+        await page.keyboard.press("Escape").catch(() => {});
+        await sleep(1000);
+      }
     }
   }
-
-  const [download] = await Promise.all([
-    page.waitForEvent("download", { timeout: 30000 }),
-    dl.click(),
-  ]);
-  await download.saveAs(tmpPath);
-  return tmpPath;
+  throw lastErr;
 }
 
 // Remove Gemini's watermark in place, operating on the Jimp bitmap (raw RGBA).
@@ -219,22 +234,44 @@ async function attachImage(page, imgPath) {
     .filter({ visible: true })
     .first();
 
-  // Open "Importation et outils", then click the visible "Fichiers" item.
-  // Filter to VISIBLE: the per-message "more options" menu trigger echoes the
-  // prompt in its aria-label (e.g. "...the attached picture...") and so matches
-  // our "attach"/"tools" substrings, but it stays hidden until hover.
-  await page
-    .locator(config.selectors.importButton)
-    .filter({ visible: true })
-    .first()
-    .click();
-  await filesItem.waitFor({ state: "visible", timeout: 5000 });
+  // Opening the import menu is flaky (the menu can be slow, or the click can land
+  // before it's ready). Retry a few times — this is all before generation, so it
+  // costs no quota. Between tries, dismiss any half-open menu and re-check whether
+  // a file input appeared in the meantime.
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      if (await existing.count()) {
+        await existing.first().setInputFiles(imgPath);
+        return;
+      }
+      // Open "Importation et outils", then click the visible "Fichiers" item.
+      // Filter to VISIBLE: the per-message "more options" menu trigger echoes the
+      // prompt in its aria-label (e.g. "...the attached picture...") and so matches
+      // our "attach"/"tools" substrings, but it stays hidden until hover.
+      await page
+        .locator(config.selectors.importButton)
+        .filter({ visible: true })
+        .first()
+        .click({ timeout: 8000 });
+      await filesItem.waitFor({ state: "visible", timeout: 5000 });
 
-  const [chooser] = await Promise.all([
-    page.waitForEvent("filechooser", { timeout: 15000 }),
-    filesItem.click(),
-  ]);
-  await chooser.setFiles(imgPath);
+      const [chooser] = await Promise.all([
+        page.waitForEvent("filechooser", { timeout: 15000 }),
+        filesItem.click(),
+      ]);
+      await chooser.setFiles(imgPath);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 3) {
+        log(`  attach retry ${attempt}/2 (${err.message.split("\n")[0]})`);
+        await page.keyboard.press("Escape").catch(() => {});
+        await sleep(1000);
+      }
+    }
+  }
+  throw lastErr;
 }
 
 async function processOne(page, imgPath, tmpPath) {
