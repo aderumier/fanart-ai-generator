@@ -1,0 +1,70 @@
+name: Build & Release
+
+# Build the Linux and Windows packages and, when a version tag is pushed,
+# publish them as a GitHub Release. You can also run it manually
+# (Actions → Build & Release → Run workflow) to get the zips as artifacts.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to create the release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Pure-JS deps (jimp, playwright-core) — portable across OSes, no browser
+      # download (we attach to the user's own Chrome over CDP).
+      - name: Install production dependencies
+        run: npm ci --omit=dev
+
+      - name: Build release zips
+        run: |
+          set -euo pipefail
+          BASE="fanart-ai-generator"
+          # App files shared by every platform.
+          common=(index.js system-mode.js config.js probe.js probe-image.js \
+                  package.json package-lock.json README.md node_modules)
+
+          # Stage app + node_modules + the given launcher scripts, then zip.
+          make_pkg() {
+            local os="$1"; shift              # remaining args = launcher scripts
+            local dir="staging/${BASE}-${os}"
+            mkdir -p "$dir/images"
+            cp -r "${common[@]}" "$dir/"
+            cp "$@" "$dir/"
+            touch "$dir/images/.gitkeep"       # keep the input folder in the zip
+            chmod +x "$dir"/*.sh 2>/dev/null || true
+            ( cd staging && zip -qr "../${BASE}-${os}.zip" "${BASE}-${os}" )
+          }
+
+          make_pkg linux   start-chrome.sh  run.sh
+          make_pkg windows start-chrome.bat run.bat
+
+          ls -lh ./*.zip
+
+      # Always available (manual runs included) for download from the run page.
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: "*.zip"
+
+      # Only on a pushed tag: attach the zips to a GitHub Release.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            fanart-ai-generator-linux.zip
+            fanart-ai-generator-windows.zip
+          generate_release_notes: true

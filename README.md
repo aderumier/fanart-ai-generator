@@ -25,6 +25,14 @@ Install [Node.js](https://nodejs.org), then once:
 npm install
 ```
 
+### Or grab a prebuilt package
+
+Each tagged release ships ready-to-run **Linux** and **Windows** zips on the
+[Releases page](https://github.com/aderumier/fanart-ai-generator/releases)
+(`fanart-ai-generator-linux.zip` / `-windows.zip`). They include the app and its
+`node_modules`, so just unzip and skip `npm install` — you still need **Node.js
+≥ 18** installed and a local Chrome. Then jump to *Launch Chrome* below.
+
 ## 1. Launch Chrome with a debug port
 
 The script attaches to your own Chrome. Start it (keep the window open):
