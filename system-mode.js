@@ -14,6 +14,29 @@ const siteOrigin = () => new URL(config.contribute.apiUrl).origin;
 // the game's generic "image" field when no boxart is available.
 const sourceMedia = (g) => g.boxart || g.image || null;
 
+// --- Refusal memory -------------------------------------------------------
+// Games Gemini permanently refuses (e.g. boxart with a public figure) are saved
+// per system so we don't waste a prompt retrying them every run.
+const refusedFilePath = (system) => path.join(config.outputDir, system, "_refused.json");
+
+async function loadRefused(system) {
+  try {
+    const data = JSON.parse(await fs.readFile(refusedFilePath(system), "utf8"));
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return []; // no file yet / unreadable
+  }
+}
+
+async function recordRefused(system, entry) {
+  const list = await loadRefused(system);
+  if (list.some((e) => String(e.id) === String(entry.id))) return; // already noted
+  list.push(entry);
+  const file = refusedFilePath(system);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(list, null, 2));
+}
+
 // Open / reuse a tab on the site and land on the system page (ensures we're on
 // the authenticated origin so fetches carry the Discord-login cookies).
 async function openContributePage(browser, system) {
@@ -146,11 +169,19 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
   if (alreadyUploaded.size)
     log(`${alreadyUploaded.size} game(s) already have an uploaded fanart — skipping those.`);
 
+  // Game ids Gemini refused before (e.g. public figures) — skip them this run.
+  const refused = config.rememberRefusals
+    ? new Set((await loadRefused(system)).map((e) => String(e.id)))
+    : new Set();
+  if (refused.size)
+    log(`${refused.size} game(s) previously refused by Gemini — skipping those.`);
+
   // Which games need fanart?
   let todo = games.filter((g) => {
     if (!sourceMedia(g)) return false; // no boxart or image to generate from
     if (config.contribute.onlyMissingFanart && g.fanart) return false;
     if (alreadyUploaded.has(g.id)) return false; // already uploaded earlier
+    if (refused.has(String(g.id))) return false; // refused on a previous run
     return true;
   });
   const total = todo.length;
@@ -196,6 +227,15 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
         // `finally` below still removes boxTmp before we leave the loop.
         log(`  ⛔ ${err.message} — stopping (daily quota reached).`);
         break;
+      }
+      if (err.skip && config.rememberRefusals) {
+        await recordRefused(system, {
+          id: g.id,
+          name: g.name,
+          phrase: err.phrase,
+          at: new Date().toISOString(),
+        }).catch(() => {});
+        log("  ↷ remembered refusal — will skip this game on future runs.");
       }
       log(`  ✗ failed ${outName}: ${err.message}`);
       failed++;

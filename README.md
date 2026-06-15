@@ -143,7 +143,8 @@ Key settings: `prompt`, `removeWatermark` (strips Gemini's bottom-right mark via
 `@pilio/gemini-watermark-remover` before resizing), `cropWatermarkIfNotRemoved`
 (when that detector can't remove the mark, crop off the right strip that contains
 it instead of leaving it in — on by default), `resize` (size/quality/`fit`),
-`outputFormat` (`"jpg"`), `newChatPerImage`, `skipExisting`, `contribute.*`, and
+`outputFormat` (`"jpg"`), `newChatPerImage`, `skipExisting`, `rememberRefusals`
+(remember refused games per system and skip them next run), `contribute.*`, and
 the brittle `selectors` block (update if Gemini's UI changes). Selectors already
 cover French + English.
 
@@ -165,6 +166,11 @@ phrase lists in [`config.js`](config.js):
 
 Matching is case-insensitive, folds typographic apostrophes (so `can't` matches
 `can't`), and only looks at text Gemini added in reply to the current prompt.
+
+In **system mode**, a refused game is remembered in `output/<system>/_refused.json`
+(when `rememberRefusals` is on, the default) and **skipped automatically on future
+runs** — these refusals are permanent (e.g. a real person on the boxart), so there's
+no point spending a prompt on them again. Delete that file (or an entry) to retry.
 
 If a run gets stuck waiting and then logs a refusal you don't recognise, copy
 the exact wording from the timeout dump:

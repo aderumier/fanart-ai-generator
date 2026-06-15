@@ -113,7 +113,12 @@ async function waitForGeneration(page, before, timeout, baseline) {
     // (stop the whole run) or it refused/clarified this one (skip to next).
     if (await matchResponse(page, config.quotaMessages, baseline)) throw new QuotaReachedError();
     const skip = await matchResponse(page, config.skipMessages, baseline);
-    if (skip) throw new Error(`skipped — Gemini responded: "${skip}"`);
+    if (skip) {
+      const e = new Error(`skipped — Gemini responded: "${skip}"`);
+      e.skip = true; // recognised by the run loops (e.g. to remember refusals)
+      e.phrase = skip;
+      throw e;
+    }
     await sleep(2000);
   }
   return false;

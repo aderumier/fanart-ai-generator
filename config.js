@@ -111,6 +111,11 @@ export const config = {
     "Je ne peux pas représenter certaines personnalités publiques",
   ],
 
+  // Remember games that Gemini refused (a skipMessage match) in a per-system file
+  // (output/<system>/_refused.json) and skip them automatically on future runs,
+  // since these refusals are permanent. Delete the file to retry them.
+  rememberRefusals: true,
+
   // Timing (milliseconds).
   timeouts: {
     // How long to wait for a generated image to appear after sending.
