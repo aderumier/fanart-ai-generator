@@ -63,7 +63,9 @@ function parseSystemArg(args) {
     if (args[i].startsWith("--system=")) return args[i].slice("--system=".length);
   }
   // Bare positional, but skip a value that belongs to another flag (e.g. --limit 10).
-  const valueFlags = new Set(["--system", "-s", "--limit", "-l", "--directory", "-d"]);
+  const valueFlags = new Set([
+    "--system", "-s", "--limit", "-l", "--directory", "-d", "--field", "-f",
+  ]);
   const positional = args.find((a, i) => !a.startsWith("-") && !valueFlags.has(args[i - 1]));
   return positional || null;
 }
@@ -95,6 +97,20 @@ function parseDirectoryArg(args) {
 }
 const DIRECTORY = parseDirectoryArg(process.argv.slice(2));
 if (DIRECTORY !== null) config.contribute.directory = DIRECTORY;
+
+// --field <name> (or -f <name>, --field=<name>): system mode only. Use this API
+// field as the source image instead of the default boxart (falls back to
+// boxart/image when a game lacks it). Overrides config.contribute.sourceField.
+function parseFieldArg(args) {
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === "--field" || args[i] === "-f") && args[i + 1] !== undefined)
+      return args[i + 1];
+    if (args[i].startsWith("--field=")) return args[i].slice("--field=".length);
+  }
+  return null;
+}
+const FIELD = parseFieldArg(process.argv.slice(2));
+if (FIELD !== null) config.contribute.sourceField = FIELD;
 
 
 async function listInputImages() {

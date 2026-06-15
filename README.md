@@ -113,15 +113,22 @@ node index.js --system dos
 node index.js --system dos --limit 10
 node index.js --system dos --directory /            # only games in the root
 node index.js --system dos --directory /subdir      # only games in subdir
+node index.js --system dos --field image            # source from the "image" field
 
 # Windows
 run.bat --system dos
 run.bat --system dos --limit 10
 run.bat --system dos --directory /subdir
+run.bat --system dos --field image
 ```
 
 Flags: `--system <name>` / `-s <name>`, `--limit <n>` / `-l <n>` (0 = no limit),
-`--directory <dir>` / `-d <dir>`.
+`--directory <dir>` / `-d <dir>`, `--field <name>` / `-f <name>`.
+
+`--field` chooses which API field is used as the source image instead of the
+default boxart (e.g. `image`, `screenshot`). It still falls back to boxart/image
+when a game lacks that field. The per-game log shows the field used, e.g.
+`[name] (image)`.
 
 `--directory` filters games by the rompath directory encoded in their game id:
 `/` selects only games in the system root, `/subdir` only games whose rom is in

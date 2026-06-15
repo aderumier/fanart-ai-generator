@@ -39,6 +39,10 @@ export const config = {
     // --directory). "" = no filter (all games); "/" = games in the root only;
     // "/subdir" = only games whose rom is in that subdirectory.
     directory: "",
+    // Which API field to use as the source image (also via --field). "" = default
+    // (boxart, then image). Set another field name (e.g. "image", "screenshot")
+    // to prefer it; it still falls back to boxart/image when a game lacks it.
+    sourceField: "",
     // false = generate + save to output/ only (review, upload manually).
     // true  = also upload the generated fanart back to the game (media_type=fanart).
     autoUpload: true,

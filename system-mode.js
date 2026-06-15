@@ -10,9 +10,20 @@ const log = (...a) => console.log(`[${new Date().toLocaleTimeString()}]`, ...a);
 
 const siteOrigin = () => new URL(config.contribute.apiUrl).origin;
 
-// Source media to generate the fanart from: prefer the boxart, but fall back to
-// the game's generic "image" field when no boxart is available.
-const sourceMedia = (g) => g.boxart || g.image || null;
+// Which API field to generate the fanart from. By default boxart, then image;
+// a configured contribute.sourceField (or --field) is preferred when present.
+// Returns the field name that actually has a value, or null if none do.
+const FALLBACK_FIELDS = ["boxart", "image"];
+function sourceFieldFor(g) {
+  const pref = config.contribute.sourceField;
+  const order = pref ? [pref, ...FALLBACK_FIELDS] : FALLBACK_FIELDS;
+  return order.find((f) => g[f]) || null;
+}
+// The media path for that field (or null when the game has none).
+const sourceMedia = (g) => {
+  const f = sourceFieldFor(g);
+  return f ? g[f] : null;
+};
 
 // The rompath directory encoded in a game id, relative to the system root, with
 // no leading/trailing slash. "subdir/game" -> "subdir"; "game" -> "" (root).
@@ -225,10 +236,11 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
   let ok = 0;
   let failed = 0;
   for (const [i, g] of todo.entries()) {
-    const src = sourceMedia(g); // boxart, or the image field when no boxart
+    const field = sourceFieldFor(g); // which API field we're sourcing from
+    const src = sourceMedia(g);
     const ext = path.extname(src) || ".jpg";
     const outName = path.basename(src, ext); // matches media naming
-    log(`(${i + 1}/${todo.length}) ${g.name}  [${outName}]${g.boxart ? "" : " (image)"}`);
+    log(`(${i + 1}/${todo.length}) ${g.name}  [${outName}]${field === "boxart" ? "" : ` (${field})`}`);
 
     const boxTmp = path.join(config.tmpDir, `${outName}.boxart${ext}`);
     try {
