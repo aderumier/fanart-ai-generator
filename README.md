@@ -7,8 +7,9 @@ generate the art, downloads it, and saves a **1920×620 JPEG**.
 Two sources:
 - **Local mode** — process every image in `./images/`.
 - **System mode** (`--system <name>`) — pull a game list from the RGS-Retro
-  contribute API, and for each game **missing fanart**, download its boxart,
-  generate fanart, and save it to `output/<system>/`.
+  contribute API, and for each game **missing fanart**, download its boxart
+  (or another field via `--field`), generate fanart, save it to `output/<system>/`,
+  and (by default) upload it back. Optionally filter by rompath with `--directory`.
 
 It works by attaching (over the Chrome DevTools Protocol) to a **real Chrome you
 launch yourself**, so Google and Discord logins work normally.
@@ -89,6 +90,10 @@ The script attaches to your own Chrome. Start it (keep the window open):
 A Chrome window opens on Gemini. **Log into Google** here. For system mode, also
 visit the contribute site once and **log in with Discord**. The session is saved
 in `./.gemini-chrome/` and reused on later runs.
+
+Leave this window open while you run the app. **Stopping the launcher (Ctrl+C, or
+closing it) now closes that Chrome too** — only the instance using this project's
+`.gemini-chrome` profile, so your everyday Chrome windows are left alone.
 
 > ⚠️ **Set the Gemini interface language to English.** The script finds the
 > upload/menu buttons by their labels, which are matched in English (French also
@@ -229,7 +234,11 @@ node probe-image.js   # inspects a generated image's download controls
   config. The probes tell you what to change.
 - **Bot checks / rate limits** — this drives the real web UI, so big batches may
   get throttled. `timeouts.betweenImages` adds a pause; if failures pile up,
-  stop and re-run later (it resumes).
-- **System mode upload** (`autoUpload`) is not wired yet — it generates and saves
-  to `output/<system>/` for review.
+  stop and re-run later (it resumes). Flaky attach/download steps are retried
+  automatically (without re-generating, so they cost no quota).
+- **System mode upload** — with `contribute.autoUpload` on (the default) each
+  generated fanart is uploaded back to the game; set it to `false` to only save
+  to `output/<system>/` for manual review.
+- **Stopping a run** — Ctrl+C stops the app and exits Node cleanly (it leaves
+  *your* Chrome running; use the launcher's Ctrl+C to close Chrome).
 ```
