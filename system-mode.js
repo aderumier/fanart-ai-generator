@@ -14,6 +14,22 @@ const siteOrigin = () => new URL(config.contribute.apiUrl).origin;
 // the game's generic "image" field when no boxart is available.
 const sourceMedia = (g) => g.boxart || g.image || null;
 
+// The rompath directory encoded in a game id, relative to the system root, with
+// no leading/trailing slash. "subdir/game" -> "subdir"; "game" -> "" (root).
+const gameDir = (id) => {
+  const s = String(id).replace(/^\/+/, "").replace(/\/+$/, "");
+  const i = s.lastIndexOf("/");
+  return i === -1 ? "" : s.slice(0, i);
+};
+
+// Normalise the --directory filter to a bare dir. "" (or null) means no filter;
+// "/" -> "" (root only); "/subdir/" -> "subdir". Returns null when no filtering.
+function directoryFilter() {
+  const d = config.contribute.directory;
+  if (d === undefined || d === null || d === "") return null;
+  return String(d).replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
 // --- Refusal memory -------------------------------------------------------
 // Games Gemini permanently refuses (e.g. boxart with a public figure) are saved
 // per system so we don't waste a prompt retrying them every run.
@@ -176,9 +192,15 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
   if (refused.size)
     log(`${refused.size} game(s) previously refused by Gemini — skipping those.`);
 
+  // Optional rompath-directory filter (--directory / contribute.directory).
+  const dirFilter = directoryFilter();
+  if (dirFilter !== null)
+    log(`Directory filter: only games in "/${dirFilter}".`);
+
   // Which games need fanart?
   let todo = games.filter((g) => {
     if (!sourceMedia(g)) return false; // no boxart or image to generate from
+    if (dirFilter !== null && gameDir(g.id) !== dirFilter) return false; // wrong directory
     if (config.contribute.onlyMissingFanart && g.fanart) return false;
     if (alreadyUploaded.has(g.id)) return false; // already uploaded earlier
     if (refused.has(String(g.id))) return false; // refused on a previous run

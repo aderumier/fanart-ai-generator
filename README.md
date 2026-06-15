@@ -111,13 +111,22 @@ run.bat                   # Windows
 # Linux/macOS
 node index.js --system dos
 node index.js --system dos --limit 10
+node index.js --system dos --directory /            # only games in the root
+node index.js --system dos --directory /subdir      # only games in subdir
 
 # Windows
 run.bat --system dos
 run.bat --system dos --limit 10
+run.bat --system dos --directory /subdir
 ```
 
-`--system <name>` / `-s <name>`, `--limit <n>` / `-l <n>` (0 = no limit).
+Flags: `--system <name>` / `-s <name>`, `--limit <n>` / `-l <n>` (0 = no limit),
+`--directory <dir>` / `-d <dir>`.
+
+`--directory` filters games by the rompath directory encoded in their game id:
+`/` selects only games in the system root, `/subdir` only games whose rom is in
+`subdir` (exact directory, not recursive). Omit it (or set `contribute.directory`
+to `""`) to process every directory.
 
 Results: local mode → `output/<name>.jpg`; system mode → `output/<system>/<name>.jpg`.
 Already-saved files are skipped, so runs are **resumable**.

@@ -63,7 +63,7 @@ function parseSystemArg(args) {
     if (args[i].startsWith("--system=")) return args[i].slice("--system=".length);
   }
   // Bare positional, but skip a value that belongs to another flag (e.g. --limit 10).
-  const valueFlags = new Set(["--system", "-s", "--limit", "-l"]);
+  const valueFlags = new Set(["--system", "-s", "--limit", "-l", "--directory", "-d"]);
   const positional = args.find((a, i) => !a.startsWith("-") && !valueFlags.has(args[i - 1]));
   return positional || null;
 }
@@ -81,6 +81,20 @@ function parseLimitArg(args) {
 }
 const LIMIT = parseLimitArg(process.argv.slice(2));
 if (LIMIT !== null && Number.isFinite(LIMIT)) config.contribute.limit = LIMIT;
+
+// --directory <d> (or -d <d>, --directory=<d>): system mode only. Filter games by
+// the rompath directory encoded in their game id. "/" = games in the root only,
+// "/subdir" = games in that subdirectory. Overrides config.contribute.directory.
+function parseDirectoryArg(args) {
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === "--directory" || args[i] === "-d") && args[i + 1] !== undefined)
+      return args[i + 1];
+    if (args[i].startsWith("--directory=")) return args[i].slice("--directory=".length);
+  }
+  return null;
+}
+const DIRECTORY = parseDirectoryArg(process.argv.slice(2));
+if (DIRECTORY !== null) config.contribute.directory = DIRECTORY;
 
 
 async function listInputImages() {

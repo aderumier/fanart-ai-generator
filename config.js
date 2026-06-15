@@ -35,6 +35,10 @@ export const config = {
     onlyMissingFanart: true,
     // Max number of games to process in one run (0 = no limit). Handy for testing.
     limit: 0,
+    // Filter games by the rompath directory encoded in their game id (also via
+    // --directory). "" = no filter (all games); "/" = games in the root only;
+    // "/subdir" = only games whose rom is in that subdirectory.
+    directory: "",
     // false = generate + save to output/ only (review, upload manually).
     // true  = also upload the generated fanart back to the game (media_type=fanart).
     autoUpload: true,
