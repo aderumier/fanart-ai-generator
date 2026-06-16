@@ -1,10 +1,5 @@
 import { chromium } from "playwright-core";
 import Jimp from "jimp";
-import {
-  removeWatermarkFromImageData,
-  detectWatermarkConfig,
-  calculateWatermarkPosition,
-} from "@pilio/gemini-watermark-remover";
 import { config } from "./config.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -202,49 +197,20 @@ async function downloadGenerated(page, destBase) {
   throw lastErr;
 }
 
-// Remove Gemini's watermark in place, operating on the Jimp bitmap (raw RGBA).
-async function stripWatermark(image) {
-  const { width, height, data } = image.bitmap;
-  const { imageData, meta } = await removeWatermarkFromImageData(
-    { data: new Uint8ClampedArray(data), width, height },
-    { adaptiveMode: "auto" }
-  );
-  image.bitmap.data = Buffer.from(imageData.data);
-  image.bitmap.width = imageData.width;
-  image.bitmap.height = imageData.height;
-  return meta;
-}
-
-// Crop off the right strip of the image that holds the (bottom-right) watermark,
-// using the library's own size→position math. Returns how many pixels were cut.
-function cropOutWatermark(image) {
-  const { width, height } = image.bitmap;
-  const cfg = detectWatermarkConfig(width, height);
-  const pos = calculateWatermarkPosition(width, height, cfg);
-  const pad = Math.round(cfg.logoSize * 0.25); // small safety margin
-  const keep = Math.max(1, Math.min(width, pos.x - pad)); // everything left of the mark
-  image.crop(0, 0, keep, height);
-  return width - keep;
-}
-
-// Optionally de-watermark, then resize/crop to target size, save as JPEG.
+// Cut config.cropRightPx off the RIGHT edge (where the prompt's black border and
+// Gemini's watermark sit), then resize/crop to target size, save as JPEG.
 async function saveOutput(srcPath, outPath) {
-  if (!config.removeWatermark && !config.resize.enabled) {
+  if (config.cropRightPx <= 0 && !config.resize.enabled) {
     await fs.copyFile(srcPath, outPath);
     return;
   }
   const image = await Jimp.read(srcPath);
 
-  if (config.removeWatermark) {
-    const meta = await stripWatermark(image);
-    if (meta.applied) {
-      log("  watermark: removed");
-    } else if (config.cropWatermarkIfNotRemoved) {
-      const cut = cropOutWatermark(image);
-      log(`  watermark: not removed (${meta.skipReason}) — cropped ${cut}px off the right`);
-    } else {
-      log(`  watermark: skipped (${meta.skipReason})`);
-    }
+  if (config.cropRightPx > 0) {
+    const { width, height } = image.bitmap;
+    const keep = Math.max(1, width - config.cropRightPx);
+    image.crop(0, 0, keep, height);
+    log(`  cropped ${width - keep}px off the right`);
   }
 
   if (config.resize.enabled) {

@@ -64,8 +64,8 @@ export const config = {
   // The same prompt sent with every image.
   prompt:
     "Inspired by the attached picture, create a fanart in the resolution of " +
-    "1920x620. With no text and no japanese text, and no game screens or " +
-    "arcade machine.",
+    "1920x620. With no text, no japanese text, and no game screens or " +
+    "arcade machines. add a 150px black border on the right side only.",
 
   // Output is always saved as JPEG at this quality, resized to width x height.
   resize: {
@@ -82,14 +82,10 @@ export const config = {
   // Output file format/extension. Saved as JPEG regardless of the source type.
   outputFormat: "jpg",
 
-  // Remove Gemini's watermark (bottom-right) before resizing/encoding.
-  // Uses @pilio/gemini-watermark-remover (reverse alpha-blending, not AI).
-  removeWatermark: true,
-
-  // Fallback when removeWatermark can't detect/remove the mark: crop off the
-  // right strip of the image that contains the (bottom-right) watermark, so it
-  // never survives into the output. The remaining image is then resized as usual.
-  cropWatermarkIfNotRemoved: true,
+  // Cut this many pixels off the RIGHT edge before resizing. The prompt asks
+  // Gemini to add a 150px black border on the right, so cropping it off removes
+  // both that border and Gemini's bottom-right watermark in one go. 0 = no crop.
+  cropRightPx: 150,
 
   // Image file extensions to pick up from inputDir.
   extensions: [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"],
