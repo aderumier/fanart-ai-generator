@@ -230,6 +230,51 @@ async function downloadGenerated(page, destBase) {
   throw lastErr;
 }
 
+// Gemini keeps REFINING the downloadable image for a few seconds after the
+// download button appears (its progressive render), so an immediate download can
+// save a half-finished image — e.g. a ragged-edged black bar — even though
+// downloading the same image a bit later gives the finished one. Watching the
+// on-screen <img> doesn't catch this (the preview settles before the full-size
+// file does), so we check the only thing that matters: download repeatedly until
+// two consecutive downloads are BYTE-IDENTICAL (the file stopped changing). Extra
+// downloads cost no quota. Returns the saved path (destBase + ext).
+async function downloadGeneratedStable(page, destBase) {
+  if (config.downloadStable?.enabled === false) return downloadGenerated(page, destBase);
+  const attempts = Math.max(2, config.downloadStable?.attempts ?? 5);
+  const interval = config.downloadStable?.interval ?? 3000;
+
+  // Each download overwrites the same temp path; we only keep the PREVIOUS bytes
+  // in memory to compare against.
+  let prevBytes = null;
+  let dest = null;
+  for (let i = 1; i <= attempts; i++) {
+    dest = await downloadGenerated(page, `${destBase}.part`);
+    const bytes = await fs.readFile(dest).catch(() => null);
+    if (prevBytes && bytes && Buffer.compare(prevBytes, bytes) === 0) {
+      log(`  download stable after ${i} checks`);
+      return finalizeDownload(dest, destBase);
+    }
+    prevBytes = bytes;
+    if (i < attempts) {
+      log(`  image still changing — re-checking in ${Math.round(interval / 1000)}s (${i}/${attempts})`);
+      await sleep(interval);
+    }
+  }
+  log(`  download didn't fully settle after ${attempts} checks — using the last one`);
+  return finalizeDownload(dest, destBase);
+}
+
+// Move a stabilization temp ("<destBase>.part.<ext>") to "<destBase>.<ext>".
+async function finalizeDownload(tempPath, destBase) {
+  const finalPath = destBase + path.extname(tempPath);
+  await fs.rm(finalPath, { force: true }).catch(() => {});
+  await fs.rename(tempPath, finalPath).catch(async () => {
+    await fs.copyFile(tempPath, finalPath);
+    await fs.rm(tempPath, { force: true }).catch(() => {});
+  });
+  return finalPath;
+}
+
 // Width of the solid PURE-BLACK vertical bar on the RIGHT edge, in pixels (0 if
 // none). A pixel only counts as black when every channel is at/below
 // config.borderBlackMax (default 0 = exactly #000000) — real artwork and
@@ -451,7 +496,7 @@ async function processOne(page, imgPath, genBase) {
     throw new Error("timed out waiting for a generated image");
   }
   log("  generated, downloading…");
-  return downloadGenerated(page, genBase);
+  return downloadGeneratedStable(page, genBase);
 }
 
 // Attach to the real Chrome you launched with `npm run chrome`.

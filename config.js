@@ -183,6 +183,20 @@ export const config = {
     uploadSettle: 4000,
   },
 
+  // Gemini keeps refining the downloadable image for a few seconds after the
+  // download button appears, so an immediate download can save a half-finished
+  // image (e.g. a ragged-edged black bar). To avoid that we download repeatedly
+  // until two consecutive downloads are byte-identical (the file stopped
+  // changing). Extra downloads cost no quota.
+  downloadStable: {
+    enabled: true,
+    // Max number of downloads while waiting for the file to stop changing.
+    attempts: 5,
+    // Pause between those downloads (ms). Raise this (or attempts) if the bug
+    // still slips through — Gemini sometimes finalises slowly.
+    interval: 3000,
+  },
+
   // Run with a visible window (true) so you can watch / intervene. headless is
   // riskier with Google's bot checks.
   headless: false,
