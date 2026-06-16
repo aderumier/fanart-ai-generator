@@ -204,21 +204,24 @@ async function downloadGenerated(page, destBase) {
 
 // Measure the solid black border running down the RIGHT edge, in pixels (0 if
 // none). Walk columns in from the right; a column counts as part of the border
-// when nearly all of its pixels are at/below `threshold` luminance. Stop at the
-// first non-black column, and never report more than half the width (a guard
-// against an all-dark image being eaten whole).
+// when nearly all of its pixels are at/below `threshold` luminance. Only the top
+// 3/4 of each column is inspected — Gemini's watermark sits in the bottom-right
+// corner, so including it would make otherwise-black border columns fail the
+// test. Stop at the first non-black column, and never report more than half the
+// width (a guard against an all-dark image being eaten whole).
 function detectRightBorderWidth(image, threshold = 16, minBlackRatio = 0.98) {
   const { width, height, data } = image.bitmap;
   const maxBorder = Math.floor(width / 2);
+  const scanHeight = Math.max(1, Math.floor((height * 3) / 4)); // skip bottom 1/4 (watermark)
   let border = 0;
   for (let x = width - 1; x >= 0 && border < maxBorder; x--) {
     let black = 0;
-    for (let y = 0; y < height; y++) {
+    for (let y = 0; y < scanHeight; y++) {
       const i = (y * width + x) * 4;
       const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
       if (lum <= threshold) black++;
     }
-    if (black >= height * minBlackRatio) border++;
+    if (black >= scanHeight * minBlackRatio) border++;
     else break;
   }
   return border;
@@ -486,20 +489,31 @@ async function openGeminiPage(browser) {
   return page;
 }
 
+// The output file path generateAndSave writes for these inputs (always JPEG when
+// config.outputFormat is set, with the configured suffix).
+function outputPathFor(outName, ext, outDir = config.outputDir) {
+  const outExt = config.outputFormat ? `.${config.outputFormat}` : ext;
+  return path.join(outDir, `${outName}${config.outputSuffix}${outExt}`);
+}
+
+// Whether the output already exists (so generation would be skipped). Lets the
+// run loops short-circuit an already-done item BEFORE downloading its source or
+// waiting out the betweenImages pacing delay.
+async function outputAlreadyExists(outName, ext, outDir = config.outputDir) {
+  if (!config.skipExisting) return false;
+  return fs.access(outputPathFor(outName, ext, outDir)).then(() => true).catch(() => false);
+}
+
 // Generate fanart from one source image: download the raw result into
 // generatedDir (kept), then watermark-remove + resize it into outDir/<outName>.
-// Returns the saved output path (or the existing one when skipped).
+// Returns the saved output path, or null when generation was skipped because the
+// output already existed (so callers can avoid re-uploading an existing image).
 async function generateAndSave(geminiPage, sourcePath, outName, ext, outDir = config.outputDir) {
   await fs.mkdir(outDir, { recursive: true });
-  // Output is always JPEG regardless of the source extension.
-  const outExt = config.outputFormat ? `.${config.outputFormat}` : ext;
-  const outPath = path.join(outDir, `${outName}${config.outputSuffix}${outExt}`);
-  if (config.skipExisting) {
-    const exists = await fs.access(outPath).then(() => true).catch(() => false);
-    if (exists) {
-      log(`  skip ${outName} — output exists`);
-      return outPath;
-    }
+  const outPath = outputPathFor(outName, ext, outDir);
+  if (await outputAlreadyExists(outName, ext, outDir)) {
+    log(`  skip ${outName} — output exists`);
+    return null;
   }
   // The raw generated image is downloaded into generatedDir and KEPT, mirroring
   // outDir's subdirectory layout under outputDir (e.g. output/<system> ->
@@ -546,6 +560,12 @@ async function runLocalMode(geminiPage) {
   for (const [i, imgPath] of images.entries()) {
     const { name, ext } = path.parse(imgPath);
     log(`(${i + 1}/${images.length}) processing ${name}`);
+    // Already done on a previous run — skip without the pacing delay below.
+    if (await outputAlreadyExists(name, ext)) {
+      log(`  skip ${name} — output exists`);
+      ok++;
+      continue;
+    }
     // Retry the SAME image while we keep hitting the quota, pausing quotaWait
     // each time. Any other outcome leaves this inner loop after one attempt.
     for (;;) {
@@ -584,7 +604,13 @@ async function main() {
 
   if (SYSTEM) {
     const { runSystemMode } = await import("./system-mode.js");
-    await runSystemMode({ browser, geminiPage, system: SYSTEM, generateAndSave });
+    await runSystemMode({
+      browser,
+      geminiPage,
+      system: SYSTEM,
+      generateAndSave,
+      outputAlreadyExists,
+    });
   } else {
     await runLocalMode(geminiPage);
   }

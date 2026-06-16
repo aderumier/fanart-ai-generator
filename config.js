@@ -64,8 +64,9 @@ export const config = {
   // The same prompt sent with every image.
   prompt:
     "Inspired by the attached picture, create a fanart in the resolution of " +
-    "1920x620. With no text, no japanese text, and no game screens or " +
-    "arcade machines. add a 150px black border on the right side only.",
+    "1920x620 with a 100px black border on the right side only starting at " +
+    "1820px. With no text, no japanese text, and no game screens or " +
+    "arcade machines.",
 
   // Output is always saved as JPEG at this quality, resized to width x height.
   resize: {

@@ -177,7 +177,13 @@ async function downloadToFile(page, url, destPath) {
   await fs.writeFile(destPath, Buffer.from(base64, "base64"));
 }
 
-export async function runSystemMode({ browser, geminiPage, system, generateAndSave }) {
+export async function runSystemMode({
+  browser,
+  geminiPage,
+  system,
+  generateAndSave,
+  outputAlreadyExists,
+}) {
   log(`System mode: ${system}`);
   const page = await openContributePage(browser, system);
 
@@ -243,14 +249,24 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
     const outName = path.basename(src, ext); // matches media naming
     log(`(${i + 1}/${todo.length}) ${g.name}  [${outName}]${field === "boxart" ? "" : ` (${field})`}`);
 
+    // Already generated on a previous run — skip BEFORE downloading the boxart or
+    // waiting out the pacing delay below (so re-runs over a done system fly past).
+    if (await outputAlreadyExists(outName, ext, outDir)) {
+      log(`  skip ${outName} — output exists`);
+      ok++;
+      continue;
+    }
+
     const boxTmp = path.join(config.tmpDir, `${outName}.boxart${ext}`);
     // Retry the SAME game while we keep hitting the quota, pausing quotaWait each
     // time. Any other outcome leaves this inner loop after one attempt.
     for (;;) {
       try {
         await downloadToFile(page, mediaBase + encodeURI(src), boxTmp);
+        // null = generation was skipped because the output already existed; don't
+        // re-upload it (avoids re-uploading media we generated on a previous run).
         const outPath = await generateAndSave(geminiPage, boxTmp, outName, ext, outDir);
-        if (config.contribute.autoUpload) {
+        if (outPath && config.contribute.autoUpload) {
           await uploadFanart(page, {
             filePath: outPath,
             filename: path.basename(outPath),
