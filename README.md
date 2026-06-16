@@ -2,14 +2,17 @@
 
 Batch-generate fanart through the **Gemini web chat** (browser automation, *no
 API*). For each source image it sends a fixed prompt, waits for Gemini to
-generate the art, downloads it, and saves a **1920×620 JPEG**.
+generate the art, downloads the raw image (kept in `./generated/`), trims the
+black border on the right (where Gemini's watermark sits), and saves a
+**1920×620 JPEG** to `./output/`.
 
 Two sources:
 - **Local mode** — process every image in `./images/`.
 - **System mode** (`--system <name>`) — pull a game list from the RGS-Retro
   contribute API, and for each game **missing fanart**, download its boxart
   (or another field via `--field`), generate fanart, save it to `output/<system>/`,
-  and (by default) upload it back. Optionally filter by rompath with `--directory`.
+  and (by default) upload it back. Optionally filter the game list by rompath
+  (`--directory`) or by starting letter (`--startletter`).
 
 It works by attaching (over the Chrome DevTools Protocol) to a **real Chrome you
 launch yourself**, so Google and Discord logins work normally.
@@ -119,16 +122,20 @@ node index.js --system dos --limit 10
 node index.js --system dos --directory /            # only games in the root
 node index.js --system dos --directory /subdir      # only games in subdir
 node index.js --system dos --field image            # source from the "image" field
+node index.js --system dos --startletter A          # only names starting with A
+node index.js --system dos --startletter A-F        # names starting A through F
 
 # Windows
 run.bat --system dos
 run.bat --system dos --limit 10
 run.bat --system dos --directory /subdir
 run.bat --system dos --field image
+run.bat --system dos --startletter A-F
 ```
 
 Flags: `--system <name>` / `-s <name>`, `--limit <n>` / `-l <n>` (0 = no limit),
-`--directory <dir>` / `-d <dir>`, `--field <name>` / `-f <name>`.
+`--directory <dir>` / `-d <dir>`, `--field <name>` / `-f <name>`,
+`--startletter <letter|range>`.
 
 `--field` chooses which API field is used as the source image instead of the
 default boxart (e.g. `image`, `screenshot`). It still falls back to boxart/image
@@ -140,8 +147,18 @@ when a game lacks that field. The per-game log shows the field used, e.g.
 `subdir` (exact directory, not recursive). Omit it (or set `contribute.directory`
 to `""`) to process every directory.
 
+`--startletter` filters games by the first letter of their **media/sort name**
+(the file name shown in `[brackets]` in the log) — `A` keeps only that letter,
+`A-F` keeps an inclusive, case-insensitive range. Note the sort name moves
+leading articles to the end, so *"The Legend of Kage"* is filed under **L**
+(`Legend of Kage, The`), not T. Handy for generating a big system in alphabetical
+batches across several runs. Also settable via `contribute.startLetter`.
+
 Results: local mode → `output/<name>.jpg`; system mode → `output/<system>/<name>.jpg`.
-Already-saved files are skipped, so runs are **resumable**.
+The raw image Gemini produced is also kept in `generated/` (mirroring the output
+layout, e.g. `generated/<system>/`). Already-saved outputs are **skipped fast**
+(before any download) and, in system mode, **not re-uploaded**, so runs are
+**resumable**.
 
 ---
 
@@ -154,20 +171,31 @@ defaults — handy for editing settings without touching the source):
 ```json
 {
   "prompt": "Inspired by the attached picture, create a fanart ...",
-  "removeWatermark": true,
+  "detectRightBorder": true,
   "resize": { "width": 1920, "height": 620, "quality": 90, "fit": "cover" },
-  "contribute": { "limit": 0, "onlyMissingFanart": true, "autoUpload": false }
+  "contribute": { "limit": 0, "onlyMissingFanart": true, "autoUpload": false, "startLetter": "" }
 }
 ```
 
-Key settings: `prompt`, `removeWatermark` (strips Gemini's bottom-right mark via
-`@pilio/gemini-watermark-remover` before resizing), `cropWatermarkIfNotRemoved`
-(when that detector can't remove the mark, crop off the right strip that contains
-it instead of leaving it in — on by default), `resize` (size/quality/`fit`),
-`outputFormat` (`"jpg"`), `newChatPerImage`, `skipExisting`, `rememberRefusals`
-(remember refused games per system and skip them next run), `contribute.*`, and
-the brittle `selectors` block (update if Gemini's UI changes). Selectors already
-cover French + English.
+**Right-edge cleanup** runs before the resize, since the prompt asks Gemini to
+add a black border on the right (and its watermark lives in that bottom-right
+corner). In order:
+
+1. `detectRightBorder` (default on) — measures the **actual** black border by
+   scanning columns in from the right edge (over the top ¾ only, so the
+   watermark doesn't break detection) and crops exactly that width. Adapts when
+   Gemini's border isn't exactly the size requested.
+2. `removeWatermark` (default on) — when **no border** is detected, fall back to
+   erasing the bottom-right mark with `@pilio/gemini-watermark-remover`.
+3. `cropWatermarkIfNotRemoved` (default on) — if that removal can't remove the
+   mark, crop off the right strip that holds it instead.
+
+Other key settings: `prompt`, `resize` (size/quality/`fit`), `outputFormat`
+(`"jpg"`), `generatedDir` (where the raw download is kept, `"./generated"`),
+`newChatPerImage`, `skipExisting`, `rememberRefusals` (remember refused games per
+system and skip them next run), `contribute.*` (including `directory` and
+`startLetter` filters), and the brittle `selectors` block (update if Gemini's UI
+changes). Selectors already cover French + English.
 
 ---
 
