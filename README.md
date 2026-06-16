@@ -94,6 +94,11 @@ A Chrome window opens on Gemini. **Log into Google** here. For system mode, also
 visit the contribute site once and **log in with Discord**. The session is saved
 in `./.gemini-chrome/` and reused on later runs.
 
+You can pass a debug port (default `9222`): `bash start-chrome.sh 9223`. Each port
+gets its own profile dir (`9222` → `.gemini-chrome`, others → `.gemini-chrome-<port>`),
+so different ports keep **separate Gemini logins** — see
+[Two instances in parallel](#two-instances-in-parallel) below.
+
 Leave this window open while you run the app. **Stopping the launcher (Ctrl+C, or
 closing it) now closes that Chrome too** — only the instance using this project's
 `.gemini-chrome` profile, so your everyday Chrome windows are left alone.
@@ -135,7 +140,7 @@ run.bat --system dos --startletter A-F
 
 Flags: `--system <name>` / `-s <name>`, `--limit <n>` / `-l <n>` (0 = no limit),
 `--directory <dir>` / `-d <dir>`, `--field <name>` / `-f <name>`,
-`--startletter <letter|range>`.
+`--startletter <letter|range>`, `--port <n>` / `-p <n>`.
 
 `--field` chooses which API field is used as the source image instead of the
 default boxart (e.g. `image`, `screenshot`). It still falls back to boxart/image
@@ -153,6 +158,32 @@ to `""`) to process every directory.
 leading articles to the end, so *"The Legend of Kage"* is filed under **L**
 (`Legend of Kage, The`), not T. Handy for generating a big system in alphabetical
 batches across several runs. Also settable via `contribute.startLetter`.
+
+`--port` picks which Chrome debug port to attach to (default `9222`), so you can
+run more than one instance at once — see below.
+
+### Two instances in parallel
+
+The daily image quota is **per Google account**, so you can roughly double
+throughput by running two instances against two accounts. Start a second Chrome on
+another port (it gets its own profile/login), then run each instance on its port —
+and **split the work** with `--startletter` (or `--directory`) so they don't both
+generate the same games:
+
+```bash
+# Terminal 1 + 2: two Chromes, two separate Gemini logins
+bash start-chrome.sh 9222        # profile ./.gemini-chrome      → account A
+bash start-chrome.sh 9223        # profile ./.gemini-chrome-9223 → account B
+
+# Terminal 3 + 4: one run per port, each handling half the alphabet
+./run.sh --system dos --port 9222 --startletter A-M
+./run.sh --system dos --port 9223 --startletter N-Z
+```
+
+On Windows use `start-chrome.bat 9223` and `run.bat --system dos --port 9223 …`;
+pass a 2nd argument to either launcher to choose the profile dir explicitly. Two
+instances on the **same** account just share one quota, so partitioning only pays
+off across different accounts.
 
 Results: local mode → `output/<name>.jpg`; system mode → `output/<system>/<name>.jpg`.
 The raw image Gemini produced is also kept in `generated/` (mirroring the output

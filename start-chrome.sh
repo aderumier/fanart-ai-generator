@@ -7,8 +7,18 @@
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Usage: ./start-chrome.sh [PORT] [PROFILE_DIR]
+# Each debug port needs its OWN profile dir so two Chromes keep SEPARATE Gemini
+# logins (Chrome also refuses to share one --user-data-dir across instances).
+# Port 9222 keeps the original ./.gemini-chrome; any other port defaults to
+# ./.gemini-chrome-<port>. Pass a 2nd argument to choose the profile explicitly.
 PORT="${1:-9222}"
-PROFILE="$DIR/.gemini-chrome"
+if [ "$PORT" = "9222" ]; then
+  DEFAULT_PROFILE="$DIR/.gemini-chrome"
+else
+  DEFAULT_PROFILE="$DIR/.gemini-chrome-$PORT"
+fi
+PROFILE="${2:-$DEFAULT_PROFILE}"
 mkdir -p "$PROFILE"
 
 echo "Starting Chrome on debug port $PORT with profile $PROFILE"

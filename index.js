@@ -65,7 +65,7 @@ function parseSystemArg(args) {
   // Bare positional, but skip a value that belongs to another flag (e.g. --limit 10).
   const valueFlags = new Set([
     "--system", "-s", "--limit", "-l", "--directory", "-d", "--field", "-f",
-    "--startletter",
+    "--startletter", "--port", "-p",
   ]);
   const positional = args.find((a, i) => !a.startsWith("-") && !valueFlags.has(args[i - 1]));
   return positional || null;
@@ -125,6 +125,20 @@ function parseStartLetterArg(args) {
 }
 const STARTLETTER = parseStartLetterArg(process.argv.slice(2));
 if (STARTLETTER !== null) config.contribute.startLetter = STARTLETTER;
+
+// --port <n> (or -p <n>, --port=<n>): the Chrome DevTools debugging port to
+// attach to. Run several instances against different Chrome sessions, each
+// started with `./start-chrome.sh <port>`. Overrides config.cdpPort.
+function parsePortArg(args) {
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === "--port" || args[i] === "-p") && args[i + 1] !== undefined)
+      return Number(args[i + 1]);
+    if (args[i].startsWith("--port=")) return Number(args[i].slice("--port=".length));
+  }
+  return null;
+}
+const PORT = parsePortArg(process.argv.slice(2));
+if (PORT !== null && Number.isFinite(PORT)) config.cdpPort = PORT;
 
 
 async function listInputImages() {

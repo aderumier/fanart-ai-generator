@@ -6,10 +6,20 @@ rem
 rem Stopping this window (Ctrl+C, or closing it) also shuts the launched Chrome
 rem down. Only the Chrome instance using this profile is closed.
 
+rem Usage: start-chrome.bat [PORT] [PROFILE_DIR]
+rem Each debug port needs its OWN profile dir so two Chromes keep SEPARATE Gemini
+rem logins (Chrome also refuses to share one --user-data-dir across instances).
+rem Port 9222 keeps the original .gemini-chrome; any other port defaults to
+rem .gemini-chrome-<port>. Pass a 2nd argument to choose the profile explicitly.
 setlocal
 set PORT=%1
 if "%PORT%"=="" set PORT=9222
-set PROFILE=%~dp0.gemini-chrome
+rem Single-line ifs (no parenthesised blocks) so a ')' in the install path can't
+rem break the script.
+set "DEFAULT_PROFILE=%~dp0.gemini-chrome"
+if not "%PORT%"=="9222" set "DEFAULT_PROFILE=%~dp0.gemini-chrome-%PORT%"
+set "PROFILE=%~2"
+if "%PROFILE%"=="" set "PROFILE=%DEFAULT_PROFILE%"
 
 set CHROME=C:\Program Files\Google\Chrome\Application\chrome.exe
 if not exist "%CHROME%" set CHROME=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe

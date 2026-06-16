@@ -2,6 +2,7 @@ node_modules/
 
 # Chrome profiles created by the chrome launcher (contain your login session)
 .gemini-chrome/
+.gemini-chrome-*/
 .gemini-profile/
 
 # Generated output and download temp files
