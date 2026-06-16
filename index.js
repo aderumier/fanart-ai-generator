@@ -230,77 +230,46 @@ async function downloadGenerated(page, destBase) {
   throw lastErr;
 }
 
-// Gemini keeps REFINING the downloadable image for a few seconds after the
-// download button appears (its progressive render), so an immediate download can
-// save a half-finished image — e.g. a ragged-edged black bar — even though
-// downloading the same image a bit later gives the finished one. Watching the
-// on-screen <img> doesn't catch this (the preview settles before the full-size
-// file does), so we check the only thing that matters: download repeatedly until
-// two consecutive downloads are BYTE-IDENTICAL (the file stopped changing). Extra
-// downloads cost no quota. Returns the saved path (destBase + ext).
-async function downloadGeneratedStable(page, destBase) {
-  if (config.downloadStable?.enabled === false) return downloadGenerated(page, destBase);
-  const attempts = Math.max(2, config.downloadStable?.attempts ?? 5);
-  const interval = config.downloadStable?.interval ?? 3000;
-
-  // Each download overwrites the same temp path; we only keep the PREVIOUS bytes
-  // in memory to compare against.
-  let prevBytes = null;
-  let dest = null;
-  for (let i = 1; i <= attempts; i++) {
-    dest = await downloadGenerated(page, `${destBase}.part`);
-    const bytes = await fs.readFile(dest).catch(() => null);
-    if (prevBytes && bytes && Buffer.compare(prevBytes, bytes) === 0) {
-      log(`  download stable after ${i} checks`);
-      return finalizeDownload(dest, destBase);
-    }
-    prevBytes = bytes;
-    if (i < attempts) {
-      log(`  image still changing — re-checking in ${Math.round(interval / 1000)}s (${i}/${attempts})`);
-      await sleep(interval);
-    }
-  }
-  log(`  download didn't fully settle after ${attempts} checks — using the last one`);
-  return finalizeDownload(dest, destBase);
-}
-
-// Move a stabilization temp ("<destBase>.part.<ext>") to "<destBase>.<ext>".
-async function finalizeDownload(tempPath, destBase) {
-  const finalPath = destBase + path.extname(tempPath);
-  await fs.rm(finalPath, { force: true }).catch(() => {});
-  await fs.rename(tempPath, finalPath).catch(async () => {
-    await fs.copyFile(tempPath, finalPath);
-    await fs.rm(tempPath, { force: true }).catch(() => {});
-  });
-  return finalPath;
-}
-
-// Width of the solid PURE-BLACK vertical bar on the RIGHT edge, in pixels (0 if
-// none). A pixel only counts as black when every channel is at/below
-// config.borderBlackMax (default 0 = exactly #000000) — real artwork and
-// Gemini's watermark are never pure black, so this matches only the bar.
+// Width of the black bar to crop off the RIGHT edge, in pixels (0 if none). A
+// pixel only counts as black when every channel is at/below config.borderBlackMax
+// — real artwork is never that dark, so this matches only the bar. Only the top
+// HALF of each column is inspected, because Gemini's watermark sits in the
+// bottom-right and isn't pure black. Two passes, walking in from the right:
 //
-// For a CLEAN, straight vertical cut (same x on the top and bottom rows), a
-// column is part of the bar only when it is black over the inspected height. Only
-// the top HALF is inspected, because Gemini's watermark sits in the bottom-right
-// and isn't pure black — including the lower rows would break otherwise-solid bar
-// columns. Walk in from the right, stop at the first column that isn't
-// (essentially) all black, and never report more than half the width.
+//   1. The SOLID bar: columns that are at least borderColumnRatio black.
+//   2. Then, when borderTrimToClean is on, keep going through the RAGGED edge the
+//      model sometimes leaves (columns that still carry SOME black, > the
+//      borderEdgeRatio "clean" threshold) until a column that is essentially
+//      black-free. This removes the wavy/artefacted boundary so the cut lands in
+//      clean artwork — at the cost of a few extra pixels (the resize compensates).
+//
+// Never reports more than half the width.
 function detectRightBorderWidth(image) {
   const { width, height, data } = image.bitmap;
   const blackMax = config.borderBlackMax ?? 0; // max per-channel value still "black"
-  const minRatio = config.borderColumnRatio ?? 1; // 1 = the whole scanned column must be black
+  const minRatio = config.borderColumnRatio ?? 1; // solid-bar column threshold
+  const edgeRatio = config.borderEdgeRatio ?? 0.02; // "clean" threshold for trimming
+  const trim = config.borderTrimToClean !== false;
   const maxBorder = Math.floor(width / 2);
   const scanHeight = Math.max(1, Math.floor(height / 2)); // top half only (skip watermark)
-  let border = 0;
-  for (let x = width - 1; x >= 0 && border < maxBorder; x--) {
+
+  const coverage = (x) => {
     let black = 0;
     for (let y = 0; y < scanHeight; y++) {
       const i = (y * width + x) * 4;
       if (data[i] <= blackMax && data[i + 1] <= blackMax && data[i + 2] <= blackMax) black++;
     }
-    if (black >= scanHeight * minRatio) border++;
-    else break;
+    return black / scanHeight;
+  };
+
+  // 1. The solid black bar.
+  let border = 0;
+  while (border < maxBorder && coverage(width - 1 - border) >= minRatio) border++;
+  if (border === 0) return 0; // no bar at all — leave it to the watermark fallback
+
+  // 2. Trim through the ragged edge until a (near-)black-free column.
+  if (trim) {
+    while (border < maxBorder && coverage(width - 1 - border) > edgeRatio) border++;
   }
   return border;
 }
@@ -496,7 +465,7 @@ async function processOne(page, imgPath, genBase) {
     throw new Error("timed out waiting for a generated image");
   }
   log("  generated, downloading…");
-  return downloadGeneratedStable(page, genBase);
+  return downloadGenerated(page, genBase);
 }
 
 // Attach to the real Chrome you launched with `npm run chrome`.

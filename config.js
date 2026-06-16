@@ -107,11 +107,21 @@ export const config = {
   // #000000-only match.
   borderBlackMax: 8,
   // Fraction of a column (top half) that must be black for it to count as part of
-  // the bar. The walk starts at the rightmost column, so requiring ~all of it
-  // (1.0) makes a single imperfect edge column abort detection; 0.5 ("mostly
-  // black") tolerates edge/anti-aliasing noise and cuts through the bar's soft
-  // edge cleanly, while still rejecting real artwork (which is far from black).
+  // the SOLID bar. The walk starts at the rightmost column, so requiring ~all of
+  // it (1.0) makes a single imperfect edge column abort detection; 0.5 ("mostly
+  // black") tolerates edge/anti-aliasing noise, while still rejecting real artwork
+  // (which is far from black).
   borderColumnRatio: 0.5,
+  // After the solid bar, keep trimming LEFT through the ragged/artefacted edge the
+  // model sometimes leaves (columns that still carry some black) until a column
+  // whose black coverage drops to <= borderEdgeRatio. This turns a wavy bar edge
+  // into a clean vertical cut landing in real artwork, at the cost of a few extra
+  // pixels (the resize compensates). Set false to cut at the solid-bar edge only.
+  borderTrimToClean: true,
+  // A column is treated as "clean" (artwork, stop trimming) once at most this
+  // fraction of its top half is black. A small value (0.02) ignores a few stray
+  // near-black pixels without eating into the artwork.
+  borderEdgeRatio: 0.02,
   removeWatermark: true,
   cropWatermarkIfNotRemoved: true,
 
@@ -181,20 +191,6 @@ export const config = {
     betweenImages: 8000,
     // How long the upload preview should settle before sending the prompt.
     uploadSettle: 4000,
-  },
-
-  // Gemini keeps refining the downloadable image for a few seconds after the
-  // download button appears, so an immediate download can save a half-finished
-  // image (e.g. a ragged-edged black bar). To avoid that we download repeatedly
-  // until two consecutive downloads are byte-identical (the file stopped
-  // changing). Extra downloads cost no quota.
-  downloadStable: {
-    enabled: true,
-    // Max number of downloads while waiting for the file to stop changing.
-    attempts: 5,
-    // Pause between those downloads (ms). Raise this (or attempts) if the bug
-    // still slips through — Gemini sometimes finalises slowly.
-    interval: 3000,
   },
 
   // Run with a visible window (true) so you can watch / intervene. headless is
