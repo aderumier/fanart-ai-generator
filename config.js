@@ -112,6 +112,8 @@ export const config = {
   retryMessages: [
     "I encountered an error doing what you asked",
     "Je ne suis pas parvenu à faire ce que vous avez demandé",
+    "Please try your request again",
+    "something went wrong",
   ],
   // How many times to re-run a generation after a retryMessages match.
   generationRetries: 2,
