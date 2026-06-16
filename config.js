@@ -183,6 +183,23 @@ export const config = {
     uploadSettle: 4000,
   },
 
+  // Gemini renders the generated image progressively (a coarse version appears
+  // first, then sharpens / may be refined), and the download button shows up
+  // before it has finished. Downloading too early saves an UNFINISHED image (e.g.
+  // a ragged black bar). So after the button appears we wait for the image to
+  // stop changing before downloading.
+  imageStable: {
+    // Minimum settle after the download button first appears.
+    settle: 2500,
+    // Treat the image as final once its fingerprint (source URL + natural size)
+    // is unchanged across this many consecutive polls...
+    polls: 3,
+    // ...spaced this far apart.
+    interval: 1000,
+    // Give up waiting for stability after this long and download anyway.
+    timeout: 30000,
+  },
+
   // Run with a visible window (true) so you can watch / intervene. headless is
   // riskier with Google's bot checks.
   headless: false,

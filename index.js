@@ -157,6 +157,47 @@ async function countDownloadButtons(page) {
   return page.locator(config.selectors.downloadButton).count();
 }
 
+// Fingerprint the LAST/largest generated image in the chat — its source URL plus
+// natural size. Gemini renders progressively (a small/blurry placeholder, then
+// the full-res image), so this string changes while it's still finalising and
+// settles once the image is final. "" when no sizeable image is present yet.
+async function generatedImageFingerprint(page) {
+  return page
+    .evaluate(() => {
+      const root = document.querySelector("main") || document.body;
+      let best = null;
+      for (const img of root.querySelectorAll("img")) {
+        const area = (img.naturalWidth || 0) * (img.naturalHeight || 0);
+        const bestArea = best ? (best.naturalWidth || 0) * (best.naturalHeight || 0) : 0;
+        if (area > bestArea) best = img;
+      }
+      if (!best || (best.naturalWidth || 0) < 256) return ""; // ignore icons/thumbnails
+      return `${best.naturalWidth}x${best.naturalHeight}|${best.currentSrc || best.src}`;
+    })
+    .catch(() => "");
+}
+
+// Wait until the generated image stops changing (progressive render finished):
+// its fingerprint must be identical across `polls` consecutive checks. Returns
+// false on timeout, so the caller still downloads (best effort).
+async function waitForImageStable(page) {
+  const { polls = 3, interval = 1000, timeout = 30000 } = config.imageStable || {};
+  const deadline = Date.now() + timeout;
+  let last = null;
+  let stable = 0;
+  while (Date.now() < deadline) {
+    const fp = await generatedImageFingerprint(page);
+    if (fp && fp === last) {
+      if (++stable >= polls) return true;
+    } else {
+      stable = 0;
+      last = fp;
+    }
+    await sleep(interval);
+  }
+  return false;
+}
+
 // Wait until a NEW download button appears (i.e. generation completed). `baseline`
 // is the response text captured just before the prompt was sent, so we only react
 // to quota/skip phrases in text that appeared afterwards.
@@ -164,7 +205,11 @@ async function waitForGeneration(page, before, timeout, baseline) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if ((await countDownloadButtons(page)) > before) {
-      await sleep(1500); // let it settle
+      // The button appears while Gemini is still finalising the image. Settle,
+      // then wait until the image stops changing, so we never download a
+      // half-rendered frame (e.g. a ragged black bar).
+      await sleep(config.imageStable?.settle ?? 1500);
+      await waitForImageStable(page);
       return true;
     }
     // Gemini answered with text instead of an image. Quota (stop the whole run),
