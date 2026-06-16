@@ -82,10 +82,18 @@ export const config = {
   // Output file format/extension. Saved as JPEG regardless of the source type.
   outputFormat: "jpg",
 
-  // Cut this many pixels off the RIGHT edge before resizing. The prompt asks
-  // Gemini to add a 150px black border on the right, so cropping it off removes
-  // both that border and Gemini's bottom-right watermark in one go. 0 = no crop.
-  cropRightPx: 150,
+  // Right-edge cleanup before resizing (the prompt's black border and Gemini's
+  // bottom-right watermark both live there). Applied in order:
+  // 1. detectRightBorder: measure the ACTUAL black border on the right (scanning
+  //    in for near-black columns, so it adapts when Gemini's border isn't
+  //    exactly 150px) and crop it off.
+  // 2. removeWatermark: when NO border is detected, fall back to erasing the
+  //    watermark with @pilio/gemini-watermark-remover (reverse alpha-blending).
+  // 3. cropWatermarkIfNotRemoved: if that removal can't detect/remove the mark,
+  //    crop off the right strip that holds it instead.
+  detectRightBorder: true,
+  removeWatermark: true,
+  cropWatermarkIfNotRemoved: true,
 
   // Image file extensions to pick up from inputDir.
   extensions: [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"],

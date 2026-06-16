@@ -1,5 +1,10 @@
 import { chromium } from "playwright-core";
 import Jimp from "jimp";
+import {
+  removeWatermarkFromImageData,
+  detectWatermarkConfig,
+  calculateWatermarkPosition,
+} from "@pilio/gemini-watermark-remover";
 import { config } from "./config.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -197,20 +202,81 @@ async function downloadGenerated(page, destBase) {
   throw lastErr;
 }
 
-// Cut config.cropRightPx off the RIGHT edge (where the prompt's black border and
-// Gemini's watermark sit), then resize/crop to target size, save as JPEG.
+// Measure the solid black border running down the RIGHT edge, in pixels (0 if
+// none). Walk columns in from the right; a column counts as part of the border
+// when nearly all of its pixels are at/below `threshold` luminance. Stop at the
+// first non-black column, and never report more than half the width (a guard
+// against an all-dark image being eaten whole).
+function detectRightBorderWidth(image, threshold = 16, minBlackRatio = 0.98) {
+  const { width, height, data } = image.bitmap;
+  const maxBorder = Math.floor(width / 2);
+  let border = 0;
+  for (let x = width - 1; x >= 0 && border < maxBorder; x--) {
+    let black = 0;
+    for (let y = 0; y < height; y++) {
+      const i = (y * width + x) * 4;
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      if (lum <= threshold) black++;
+    }
+    if (black >= height * minBlackRatio) border++;
+    else break;
+  }
+  return border;
+}
+
+// Remove Gemini's watermark in place, operating on the Jimp bitmap (raw RGBA).
+async function stripWatermark(image) {
+  const { width, height, data } = image.bitmap;
+  const { imageData, meta } = await removeWatermarkFromImageData(
+    { data: new Uint8ClampedArray(data), width, height },
+    { adaptiveMode: "auto" }
+  );
+  image.bitmap.data = Buffer.from(imageData.data);
+  image.bitmap.width = imageData.width;
+  image.bitmap.height = imageData.height;
+  return meta;
+}
+
+// Crop off the right strip of the image that holds the (bottom-right) watermark,
+// using the library's own size→position math. Returns how many pixels were cut.
+function cropOutWatermark(image) {
+  const { width, height } = image.bitmap;
+  const cfg = detectWatermarkConfig(width, height);
+  const pos = calculateWatermarkPosition(width, height, cfg);
+  const pad = Math.round(cfg.logoSize * 0.25); // small safety margin
+  const keep = Math.max(1, Math.min(width, pos.x - pad)); // everything left of the mark
+  image.crop(0, 0, keep, height);
+  return width - keep;
+}
+
+// Clean up the RIGHT edge (the prompt's black border and Gemini's watermark sit
+// there), then resize/crop to target size, save as JPEG. Prefer cropping the
+// detected black border; when none is found, fall back to watermark removal.
 async function saveOutput(srcPath, outPath) {
-  if (config.cropRightPx <= 0 && !config.resize.enabled) {
+  if (!config.detectRightBorder && !config.removeWatermark && !config.resize.enabled) {
     await fs.copyFile(srcPath, outPath);
     return;
   }
   const image = await Jimp.read(srcPath);
 
-  if (config.cropRightPx > 0) {
+  // 1. Crop the black border Gemini was asked to add on the right.
+  const border = config.detectRightBorder ? detectRightBorderWidth(image) : 0;
+  if (border > 0) {
     const { width, height } = image.bitmap;
-    const keep = Math.max(1, width - config.cropRightPx);
+    const keep = Math.max(1, width - border);
     image.crop(0, 0, keep, height);
-    log(`  cropped ${width - keep}px off the right`);
+    log(`  detected black border: ${border}px — cropped off the right (${width} → ${keep}px wide)`);
+  } else if (config.removeWatermark) {
+    // 2. No border detected — fall back to erasing the bottom-right watermark.
+    const meta = await stripWatermark(image);
+    if (meta.applied) {
+      log("  no border detected — watermark: removed");
+    } else if (config.cropWatermarkIfNotRemoved) {
+      const cut = cropOutWatermark(image);
+      log(`  no border detected — watermark not removed (${meta.skipReason}); cropped ${cut}px off the right`);
+    } else {
+      log(`  no border detected — watermark: skipped (${meta.skipReason})`);
+    }
   }
 
   if (config.resize.enabled) {
