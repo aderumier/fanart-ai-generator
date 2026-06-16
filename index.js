@@ -65,6 +65,7 @@ function parseSystemArg(args) {
   // Bare positional, but skip a value that belongs to another flag (e.g. --limit 10).
   const valueFlags = new Set([
     "--system", "-s", "--limit", "-l", "--directory", "-d", "--field", "-f",
+    "--startletter",
   ]);
   const positional = args.find((a, i) => !a.startsWith("-") && !valueFlags.has(args[i - 1]));
   return positional || null;
@@ -111,6 +112,19 @@ function parseFieldArg(args) {
 }
 const FIELD = parseFieldArg(process.argv.slice(2));
 if (FIELD !== null) config.contribute.sourceField = FIELD;
+
+// --startletter <v> (or --startletter=<v>): system mode only. Filter games whose
+// media/sort name starts with this letter, or letter range "A-F" (inclusive,
+// case-insensitive). Overrides config.contribute.startLetter.
+function parseStartLetterArg(args) {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--startletter" && args[i + 1] !== undefined) return args[i + 1];
+    if (args[i].startsWith("--startletter=")) return args[i].slice("--startletter=".length);
+  }
+  return null;
+}
+const STARTLETTER = parseStartLetterArg(process.argv.slice(2));
+if (STARTLETTER !== null) config.contribute.startLetter = STARTLETTER;
 
 
 async function listInputImages() {

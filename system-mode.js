@@ -41,6 +41,34 @@ function directoryFilter() {
   return String(d).replace(/^\/+/, "").replace(/\/+$/, "");
 }
 
+// The media/sort name used for a game's output file (e.g. "Day at the Races, A
+// (USA)"), or "" when the game has no source media.
+function mediaOutName(g) {
+  const src = sourceMedia(g);
+  return src ? path.basename(src, path.extname(src)) : "";
+}
+
+// Parse the --startletter filter ("A" or "A-F", case-insensitive) into an
+// uppercase { from, to } range, or null when unset. Invalid input is ignored.
+function startLetterRange() {
+  const raw = (config.contribute.startLetter || "").trim().toUpperCase();
+  if (!raw) return null;
+  const m = raw.match(/^([A-Z0-9])\s*(?:-\s*([A-Z0-9]))?$/);
+  if (!m) {
+    log(`Ignoring invalid --startletter "${config.contribute.startLetter}" (use e.g. A or A-F).`);
+    return null;
+  }
+  let [, from, to = from] = m;
+  if (from > to) [from, to] = [to, from]; // tolerate a reversed range like F-A
+  return { from, to };
+}
+
+// Whether a name's first character falls within an uppercase { from, to } range.
+function inLetterRange(name, range) {
+  const c = String(name).trim().charAt(0).toUpperCase();
+  return c >= range.from && c <= range.to;
+}
+
 // --- Refusal memory -------------------------------------------------------
 // Games Gemini permanently refuses (e.g. boxart with a public figure) are saved
 // per system so we don't waste a prompt retrying them every run.
@@ -214,10 +242,19 @@ export async function runSystemMode({
   if (dirFilter !== null)
     log(`Directory filter: only games in "/${dirFilter}".`);
 
+  // Optional first-letter filter (--startletter / contribute.startLetter).
+  const letterRange = startLetterRange();
+  if (letterRange)
+    log(
+      `Start-letter filter: only games starting with ` +
+        `${letterRange.from === letterRange.to ? letterRange.from : `${letterRange.from}-${letterRange.to}`}.`
+    );
+
   // Which games need fanart?
   let todo = games.filter((g) => {
     if (!sourceMedia(g)) return false; // no boxart or image to generate from
     if (dirFilter !== null && gameDir(g.id) !== dirFilter) return false; // wrong directory
+    if (letterRange && !inLetterRange(mediaOutName(g), letterRange)) return false; // wrong letter
     if (config.contribute.onlyMissingFanart && g.fanart) return false;
     if (alreadyUploaded.has(g.id)) return false; // already uploaded earlier
     if (refused.has(String(g.id))) return false; // refused on a previous run

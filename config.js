@@ -43,6 +43,11 @@ export const config = {
     // --directory). "" = no filter (all games); "/" = games in the root only;
     // "/subdir" = only games whose rom is in that subdirectory.
     directory: "",
+    // Filter games by the first letter of their media/sort name (also via
+    // --startletter). "" = no filter; "A" = only names starting with A; "A-F" =
+    // a letter range (inclusive, case-insensitive). Handy for batching a system
+    // in alphabetical chunks across several runs.
+    startLetter: "",
     // Which API field to use as the source image (also via --field). "" = default
     // (boxart, then image). Set another field name (e.g. "image", "screenshot")
     // to prefer it; it still falls back to boxart/image when a game lacks it.
