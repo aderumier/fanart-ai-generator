@@ -235,6 +235,7 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
 
   let ok = 0;
   let failed = 0;
+  let stop = false;
   for (const [i, g] of todo.entries()) {
     const field = sourceFieldFor(g); // which API field we're sourcing from
     const src = sourceMedia(g);
@@ -243,39 +244,53 @@ export async function runSystemMode({ browser, geminiPage, system, generateAndSa
     log(`(${i + 1}/${todo.length}) ${g.name}  [${outName}]${field === "boxart" ? "" : ` (${field})`}`);
 
     const boxTmp = path.join(config.tmpDir, `${outName}.boxart${ext}`);
-    try {
-      await downloadToFile(page, mediaBase + encodeURI(src), boxTmp);
-      const outPath = await generateAndSave(geminiPage, boxTmp, outName, ext, outDir);
-      if (config.contribute.autoUpload) {
-        await uploadFanart(page, {
-          filePath: outPath,
-          filename: path.basename(outPath),
-          system,
-          gameId: g.id,
-        });
-        log("  ⬆ uploaded fanart");
+    // Retry the SAME game while we keep hitting the quota, pausing quotaWait each
+    // time. Any other outcome leaves this inner loop after one attempt.
+    for (;;) {
+      try {
+        await downloadToFile(page, mediaBase + encodeURI(src), boxTmp);
+        const outPath = await generateAndSave(geminiPage, boxTmp, outName, ext, outDir);
+        if (config.contribute.autoUpload) {
+          await uploadFanart(page, {
+            filePath: outPath,
+            filename: path.basename(outPath),
+            system,
+            gameId: g.id,
+          });
+          log("  ⬆ uploaded fanart");
+        }
+        ok++;
+      } catch (err) {
+        if (err.quota) {
+          if (config.quotaWait > 0) {
+            // `finally` removes boxTmp before we wait; it's re-downloaded on retry.
+            const mins = Math.round(config.quotaWait / 60000);
+            log(`  ⛔ ${err.message} — waiting ${mins} min, then retrying (quota).`);
+            await sleep(config.quotaWait);
+            continue; // re-run this same game
+          }
+          // `finally` below still removes boxTmp before we leave the loop.
+          log(`  ⛔ ${err.message} — stopping (daily quota reached).`);
+          stop = true;
+        } else {
+          if (err.skip && config.rememberRefusals) {
+            await recordRefused(system, {
+              id: g.id,
+              name: g.name,
+              phrase: err.phrase,
+              at: new Date().toISOString(),
+            }).catch(() => {});
+            log("  ↷ remembered refusal — will skip this game on future runs.");
+          }
+          log(`  ✗ failed ${outName}: ${err.message}`);
+          failed++;
+        }
+      } finally {
+        await fs.rm(boxTmp, { force: true }).catch(() => {});
       }
-      ok++;
-    } catch (err) {
-      if (err.quota) {
-        // `finally` below still removes boxTmp before we leave the loop.
-        log(`  ⛔ ${err.message} — stopping (daily quota reached).`);
-        break;
-      }
-      if (err.skip && config.rememberRefusals) {
-        await recordRefused(system, {
-          id: g.id,
-          name: g.name,
-          phrase: err.phrase,
-          at: new Date().toISOString(),
-        }).catch(() => {});
-        log("  ↷ remembered refusal — will skip this game on future runs.");
-      }
-      log(`  ✗ failed ${outName}: ${err.message}`);
-      failed++;
-    } finally {
-      await fs.rm(boxTmp, { force: true }).catch(() => {});
+      break;
     }
+    if (stop) break;
     if (i < todo.length - 1) await sleep(config.timeouts.betweenImages);
   }
   log(`Done. ${ok} succeeded, ${failed} failed.`);

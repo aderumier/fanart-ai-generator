@@ -501,20 +501,34 @@ async function runLocalMode(geminiPage) {
 
   let ok = 0;
   let failed = 0;
+  let stop = false;
   for (const [i, imgPath] of images.entries()) {
     const { name, ext } = path.parse(imgPath);
     log(`(${i + 1}/${images.length}) processing ${name}`);
-    try {
-      await generateAndSave(geminiPage, imgPath, name, ext);
-      ok++;
-    } catch (err) {
-      if (err.quota) {
-        log(`  ⛔ ${err.message} — stopping (daily quota reached).`);
-        break;
+    // Retry the SAME image while we keep hitting the quota, pausing quotaWait
+    // each time. Any other outcome leaves this inner loop after one attempt.
+    for (;;) {
+      try {
+        await generateAndSave(geminiPage, imgPath, name, ext);
+        ok++;
+      } catch (err) {
+        if (err.quota) {
+          if (config.quotaWait > 0) {
+            const mins = Math.round(config.quotaWait / 60000);
+            log(`  ⛔ ${err.message} — waiting ${mins} min, then retrying (quota).`);
+            await sleep(config.quotaWait);
+            continue; // re-run this same image
+          }
+          log(`  ⛔ ${err.message} — stopping (daily quota reached).`);
+          stop = true;
+        } else {
+          log(`  ✗ failed ${name}: ${err.message}`);
+          failed++;
+        }
       }
-      log(`  ✗ failed ${name}: ${err.message}`);
-      failed++;
+      break;
     }
+    if (stop) break;
     if (i < images.length - 1) await sleep(config.timeouts.betweenImages);
   }
   log(`Done. ${ok} succeeded, ${failed} failed.`);

@@ -92,7 +92,7 @@ export const config = {
 
   // Phrases Gemini shows when you've hit the daily image-generation quota.
   // If the latest response contains any of these (case-insensitive substring),
-  // the run STOPS immediately — there's no point retrying the rest today.
+  // we pause for `quotaWait` ms and retry the SAME image (see quotaWait below).
   // Add more variants here as you encounter them.
   quotaMessages: [
     "I can't create more images for you today",
@@ -106,6 +106,12 @@ export const config = {
     "je ne peux pas créer plus d'images",
     "plus d'images pour aujourd'hui",
   ],
+
+  // When a quotaMessages phrase is hit, how long to wait (ms) before retrying the
+  // same image, instead of stopping the run. The daily quota typically frees up
+  // over time, so we sleep and try again. Set to 0 to stop the run immediately
+  // (the old behaviour). Default: 1 hour.
+  quotaWait: 60 * 60 * 1000,
 
   // Phrases where Gemini hit a TRANSIENT error and asks us to try again. The
   // generation is re-run (up to generationRetries times) instead of skipped.
