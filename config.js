@@ -68,10 +68,10 @@ export const config = {
 
   // The same prompt sent with every image.
   prompt:
-    "Inspired by the attached picture, create a fanart in the resolution of " +
-    "1920x620 with a 100px black border on the right side only starting at " +
-    "1820px. With no text, no japanese text, and no game screens or " +
-    "arcade machines.",
+    "Inspired by the attached picture, create an ultra-wide 3:1 banner fanart. " +
+    "Reserve the rightmost 5% of the width as a solid pure-black (#000000) " +
+    "vertical bar; the artwork must fill the remaining left portion edge to edge. " +
+    "No text, no japanese text, no game screens or arcade machines.",
 
   // Output is always saved as JPEG at this quality, resized to width x height.
   resize: {
@@ -90,14 +90,28 @@ export const config = {
 
   // Right-edge cleanup before resizing (the prompt's black border and Gemini's
   // bottom-right watermark both live there). Applied in order:
-  // 1. detectRightBorder: measure the ACTUAL black border on the right (scanning
-  //    in for near-black columns, so it adapts when Gemini's border isn't
-  //    exactly 150px) and crop it off.
-  // 2. removeWatermark: when NO border is detected, fall back to erasing the
+  // 1. detectRightBorder: find the solid PURE-BLACK vertical bar on the right and
+  //    crop it off with a clean, straight vertical cut. A pixel only counts as
+  //    black when every channel is <= borderBlackMax, and a column only counts as
+  //    the bar when it is black over the inspected height (top half, to skip the
+  //    watermark) — so the cut lands at the same x top and bottom.
+  // 2. removeWatermark: when NO bar is detected, fall back to erasing the
   //    watermark with @pilio/gemini-watermark-remover (reverse alpha-blending).
   // 3. cropWatermarkIfNotRemoved: if that removal can't detect/remove the mark,
   //    crop off the right strip that holds it instead.
   detectRightBorder: true,
+  // Max per-channel value (0-255) a pixel may have and still count as bar black.
+  // Gemini's "pure black" bar comes back as #000000 plus a little render/PNG
+  // noise (pixels up to ~#080808), so an exact 0 match finds nothing. 8 absorbs
+  // that noise while staying far darker than any real artwork; set 0 for an exact
+  // #000000-only match.
+  borderBlackMax: 8,
+  // Fraction of a column (top half) that must be black for it to count as part of
+  // the bar. The walk starts at the rightmost column, so requiring ~all of it
+  // (1.0) makes a single imperfect edge column abort detection; 0.5 ("mostly
+  // black") tolerates edge/anti-aliasing noise and cuts through the bar's soft
+  // edge cleanly, while still rejecting real artwork (which is far from black).
+  borderColumnRatio: 0.5,
   removeWatermark: true,
   cropWatermarkIfNotRemoved: true,
 

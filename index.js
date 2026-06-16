@@ -216,26 +216,31 @@ async function downloadGenerated(page, destBase) {
   throw lastErr;
 }
 
-// Measure the solid black border running down the RIGHT edge, in pixels (0 if
-// none). Walk columns in from the right; a column counts as part of the border
-// when nearly all of its pixels are at/below `threshold` luminance. Only the top
-// 3/4 of each column is inspected — Gemini's watermark sits in the bottom-right
-// corner, so including it would make otherwise-black border columns fail the
-// test. Stop at the first non-black column, and never report more than half the
-// width (a guard against an all-dark image being eaten whole).
-function detectRightBorderWidth(image, threshold = 16, minBlackRatio = 0.98) {
+// Width of the solid PURE-BLACK vertical bar on the RIGHT edge, in pixels (0 if
+// none). A pixel only counts as black when every channel is at/below
+// config.borderBlackMax (default 0 = exactly #000000) — real artwork and
+// Gemini's watermark are never pure black, so this matches only the bar.
+//
+// For a CLEAN, straight vertical cut (same x on the top and bottom rows), a
+// column is part of the bar only when it is black over the inspected height. Only
+// the top HALF is inspected, because Gemini's watermark sits in the bottom-right
+// and isn't pure black — including the lower rows would break otherwise-solid bar
+// columns. Walk in from the right, stop at the first column that isn't
+// (essentially) all black, and never report more than half the width.
+function detectRightBorderWidth(image) {
   const { width, height, data } = image.bitmap;
+  const blackMax = config.borderBlackMax ?? 0; // max per-channel value still "black"
+  const minRatio = config.borderColumnRatio ?? 1; // 1 = the whole scanned column must be black
   const maxBorder = Math.floor(width / 2);
-  const scanHeight = Math.max(1, Math.floor((height * 3) / 4)); // skip bottom 1/4 (watermark)
+  const scanHeight = Math.max(1, Math.floor(height / 2)); // top half only (skip watermark)
   let border = 0;
   for (let x = width - 1; x >= 0 && border < maxBorder; x--) {
     let black = 0;
     for (let y = 0; y < scanHeight; y++) {
       const i = (y * width + x) * 4;
-      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      if (lum <= threshold) black++;
+      if (data[i] <= blackMax && data[i + 1] <= blackMax && data[i + 2] <= blackMax) black++;
     }
-    if (black >= scanHeight * minBlackRatio) border++;
+    if (black >= scanHeight * minRatio) border++;
     else break;
   }
   return border;
