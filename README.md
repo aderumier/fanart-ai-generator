@@ -180,6 +180,9 @@ phrase lists in [`config.js`](config.js):
   *"I can't create more images for you today"*). The whole run **stops**
   immediately; there's no point retrying the rest today. Re-run tomorrow — it
   resumes (already-saved files are skipped).
+- **`retryMessages`** — Gemini hit a *transient* error and asked to try again
+  (e.g. *"I encountered an error doing what you asked…"*). The same image is
+  **re-generated**, up to `generationRetries` times (default 2), before giving up.
 - **`skipMessages`** — Gemini refused *this* image but the run should continue
   (e.g. *"I can create images of people…"*, *"…I can't depict some public
   figures…"*). That game is **skipped right away** (no waiting out the timeout)

@@ -107,6 +107,15 @@ export const config = {
     "plus d'images pour aujourd'hui",
   ],
 
+  // Phrases where Gemini hit a TRANSIENT error and asks us to try again. The
+  // generation is re-run (up to generationRetries times) instead of skipped.
+  retryMessages: [
+    "I encountered an error doing what you asked",
+    "Je ne suis pas parvenu à faire ce que vous avez demandé",
+  ],
+  // How many times to re-run a generation after a retryMessages match.
+  generationRetries: 2,
+
   // Phrases that mean THIS image won't be generated, but the run should continue.
   // If the latest response matches any of these, we SKIP to the next game right
   // away instead of waiting out the full generation timeout. (Not a quota stop.)

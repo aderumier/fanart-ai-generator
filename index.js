@@ -139,9 +139,16 @@ async function waitForGeneration(page, before, timeout, baseline) {
       await sleep(1500); // let it settle
       return true;
     }
-    // Gemini answered with text instead of an image. Either we're out of quota
-    // (stop the whole run) or it refused/clarified this one (skip to next).
+    // Gemini answered with text instead of an image. Quota (stop the whole run),
+    // a transient error (retry this image), or a refusal/clarification (skip it).
     if (await matchResponse(page, config.quotaMessages, baseline)) throw new QuotaReachedError();
+    const retry = await matchResponse(page, config.retryMessages, baseline);
+    if (retry) {
+      const e = new Error(`Gemini hit a transient error — "${retry}"`);
+      e.retry = true; // recognised by generateAndSave to re-run the generation
+      e.phrase = retry;
+      throw e;
+    }
     const skip = await matchResponse(page, config.skipMessages, baseline);
     if (skip) {
       const e = new Error(`skipped — Gemini responded: "${skip}"`);
@@ -459,7 +466,22 @@ async function generateAndSave(geminiPage, sourcePath, outName, ext, outDir = co
   await fs.mkdir(config.tmpDir, { recursive: true });
   const tmpPath = path.join(config.tmpDir, `${outName}.download`);
   try {
-    await processOne(geminiPage, sourcePath, tmpPath);
+    // Re-run the generation when Gemini reports a transient error and asks us to
+    // try again (a `.retry` error). Quota/skip errors propagate immediately.
+    const maxAttempts = (config.generationRetries ?? 0) + 1;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await processOne(geminiPage, sourcePath, tmpPath);
+        break;
+      } catch (err) {
+        if (err.retry && attempt < maxAttempts) {
+          log(`  ⟳ ${err.message} — retry ${attempt}/${maxAttempts - 1}`);
+          await sleep(config.timeouts.betweenImages);
+          continue;
+        }
+        throw err;
+      }
+    }
     await saveOutput(tmpPath, outPath);
     log(`  ✓ saved ${outPath}`);
     return outPath;
