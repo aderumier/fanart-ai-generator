@@ -13,6 +13,10 @@ export const config = {
   // Folders (relative to this project).
   inputDir: "./images",
   outputDir: "./output",
+  // Where the RAW image downloaded from Gemini is kept (before watermark removal
+  // + resize). The processed result goes to outputDir. Mirrors outputDir's
+  // subdirectory layout (e.g. system mode -> generated/<system>/).
+  generatedDir: "./generated",
   // Scratch dir for downloaded source images (boxart) before processing.
   tmpDir: "./tmp",
 

@@ -6,6 +6,7 @@ node_modules/
 
 # Generated output and download temp files
 output/
+generated/
 tmp/
 
 # Your input images (keep the folder, not its contents)

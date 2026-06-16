@@ -162,8 +162,10 @@ async function waitForGeneration(page, before, timeout, baseline) {
 }
 
 // Click Gemini's own "download full-size" button on the latest generated image
-// and capture the file via the browser download event. Returns the temp path.
-async function downloadGenerated(page, tmpPath) {
+// and capture the file via the browser download event. Saves to `destBase` +
+// the real extension from Gemini's suggested filename (PNG fallback); returns
+// that full path.
+async function downloadGenerated(page, destBase) {
   const dl = page.locator(config.selectors.downloadButton).last();
 
   // The download click is flaky (it can open a menu instead of firing the
@@ -185,8 +187,9 @@ async function downloadGenerated(page, tmpPath) {
         page.waitForEvent("download", { timeout: 30000 }),
         dl.click({ timeout: 8000 }),
       ]);
-      await download.saveAs(tmpPath);
-      return tmpPath;
+      const dest = destBase + (path.extname(download.suggestedFilename() || "") || ".png");
+      await download.saveAs(dest);
+      return dest;
     } catch (err) {
       lastErr = err;
       if (attempt < 3) {
@@ -331,7 +334,9 @@ async function attachImage(page, imgPath) {
   throw lastErr;
 }
 
-async function processOne(page, imgPath, tmpPath) {
+// Generate from `imgPath` and download the result to `genBase` + its real
+// extension. Returns that saved path.
+async function processOne(page, imgPath, genBase) {
   // Start from a clean chat so nothing from the previous image is on screen.
   if (config.newChatPerImage) {
     await page.goto(config.url, { waitUntil: "domcontentloaded" });
@@ -378,7 +383,7 @@ async function processOne(page, imgPath, tmpPath) {
     throw new Error("timed out waiting for a generated image");
   }
   log("  generated, downloading…");
-  return downloadGenerated(page, tmpPath);
+  return downloadGenerated(page, genBase);
 }
 
 // Attach to the real Chrome you launched with `npm run chrome`.
@@ -449,8 +454,9 @@ async function openGeminiPage(browser) {
   return page;
 }
 
-// Generate fanart from one source image and save it to outputDir/<outName><ext>.
-// Returns the saved path, or null if the output already existed (skipped).
+// Generate fanart from one source image: download the raw result into
+// generatedDir (kept), then watermark-remove + resize it into outDir/<outName>.
+// Returns the saved output path (or the existing one when skipped).
 async function generateAndSave(geminiPage, sourcePath, outName, ext, outDir = config.outputDir) {
   await fs.mkdir(outDir, { recursive: true });
   // Output is always JPEG regardless of the source extension.
@@ -463,31 +469,34 @@ async function generateAndSave(geminiPage, sourcePath, outName, ext, outDir = co
       return outPath;
     }
   }
-  await fs.mkdir(config.tmpDir, { recursive: true });
-  const tmpPath = path.join(config.tmpDir, `${outName}.download`);
-  try {
-    // Re-run the generation when Gemini reports a transient error and asks us to
-    // try again (a `.retry` error). Quota/skip errors propagate immediately.
-    const maxAttempts = (config.generationRetries ?? 0) + 1;
-    for (let attempt = 1; ; attempt++) {
-      try {
-        await processOne(geminiPage, sourcePath, tmpPath);
-        break;
-      } catch (err) {
-        if (err.retry && attempt < maxAttempts) {
-          log(`  ⟳ ${err.message} — retry ${attempt}/${maxAttempts - 1}`);
-          await sleep(config.timeouts.betweenImages);
-          continue;
-        }
-        throw err;
+  // The raw generated image is downloaded into generatedDir and KEPT, mirroring
+  // outDir's subdirectory layout under outputDir (e.g. output/<system> ->
+  // generated/<system>). Watermark removal + resize then writes to outPath.
+  const genDir = path.join(config.generatedDir, path.relative(config.outputDir, outDir));
+  await fs.mkdir(genDir, { recursive: true });
+  const genBase = path.join(genDir, outName);
+
+  // Re-run the generation when Gemini reports a transient error and asks us to
+  // try again (a `.retry` error). Quota/skip errors propagate immediately.
+  const maxAttempts = (config.generationRetries ?? 0) + 1;
+  let genPath;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      genPath = await processOne(geminiPage, sourcePath, genBase);
+      break;
+    } catch (err) {
+      if (err.retry && attempt < maxAttempts) {
+        log(`  ⟳ ${err.message} — retry ${attempt}/${maxAttempts - 1}`);
+        await sleep(config.timeouts.betweenImages);
+        continue;
       }
+      throw err;
     }
-    await saveOutput(tmpPath, outPath);
-    log(`  ✓ saved ${outPath}`);
-    return outPath;
-  } finally {
-    await fs.rm(tmpPath, { force: true }).catch(() => {});
   }
+  log(`  ⬇ generated ${genPath}`);
+  await saveOutput(genPath, outPath);
+  log(`  ✓ saved ${outPath}`);
+  return outPath;
 }
 
 // ---- Mode 1: local images directory (the original behaviour) ----
