@@ -126,6 +126,8 @@ export const config = {
     "I can't depict some public figures",
     "depict some public figures",
     "Je ne peux pas représenter certaines personnalités publiques",
+    // Blocked over third-party content/IP (editing the prompt won't help us).
+    "interests of third-party content providers",
   ],
 
   // Remember games that Gemini refused (a skipMessage match) in a per-system file
