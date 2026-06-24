@@ -615,11 +615,7 @@ async function generateAndSave(geminiPage, sourcePath, outName, ext, outDir = co
     const phrase = String(err.phrase || err.message || "").toLowerCase();
     return (
       err.skip &&
-      (
-        phrase.includes("public figure") ||
-        phrase.includes("public figures") ||
-        phrase.includes("personnalités publiques")
-      )
+      config.skipMessages.some((m) => phrase.includes(m.toLowerCase()))
     );
   };
 
