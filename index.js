@@ -418,7 +418,7 @@ async function attachImage(page, imgPath) {
 
 // Generate from `imgPath` and download the result to `genBase` + its real
 // extension. Returns that saved path.
-async function processOne(page, imgPath, genBase) {
+async function processOne(page, imgPath, genBase, promptText = config.prompt) {
   // Start from a clean chat so nothing from the previous image is on screen.
   if (config.newChatPerImage) {
     await page.goto(config.url, { waitUntil: "domcontentloaded" });
@@ -440,7 +440,7 @@ async function processOne(page, imgPath, genBase) {
   // 2. Type the prompt.
   const box = page.locator(config.selectors.promptBox).first();
   await box.click();
-  await box.fill(config.prompt);
+  await box.fill(promptText);
 
   // Snapshot the visible response text BEFORE sending, so quota/skip detection
   // only considers what Gemini adds in reply to THIS prompt (not a restored chat).
@@ -460,6 +460,45 @@ async function processOne(page, imgPath, genBase) {
   if (!done) {
     // Dump what Gemini actually said in reply to this prompt, so unknown
     // quota/refusal wording can be copied into config.quotaMessages/skipMessages.
+    const tail = newSinceBaseline(await responseText(page), baseline).slice(-600).trim();
+    log(`  (no image) Gemini's reply text was:\n----\n${tail}\n----`);
+    throw new Error("timed out waiting for a generated image");
+  }
+  log("  generated, downloading…");
+  return downloadGenerated(page, genBase);
+}
+
+async function processTextOnly(page, promptText, genBase) {
+  // Start from a clean chat and generate WITHOUT attaching the source image.
+  // This is the final fallback for covers that Gemini refuses because they
+  // contain a real/public figure.
+  if (config.newChatPerImage) {
+    await page.goto(config.url, { waitUntil: "domcontentloaded" });
+    await page
+      .locator(config.selectors.promptBox)
+      .first()
+      .waitFor({ state: "visible", timeout: 20000 });
+    await sleep(1000);
+  }
+
+  const before = await countDownloadButtons(page);
+
+  const box = page.locator(config.selectors.promptBox).first();
+  await box.click();
+  await box.fill(promptText);
+
+  const baseline = await responseText(page);
+
+  const sendBtn = page.locator(config.selectors.sendButton).first();
+  if (await sendBtn.count()) {
+    await sendBtn.click().catch(() => box.press("Enter"));
+  } else {
+    await box.press("Enter");
+  }
+  log("  ultra-fallback text-only prompt sent, waiting for generated image…");
+
+  const done = await waitForGeneration(page, before, config.timeouts.generation, baseline);
+  if (!done) {
     const tail = newSinceBaseline(await responseText(page), baseline).slice(-600).trim();
     log(`  (no image) Gemini's reply text was:\n----\n${tail}\n----`);
     throw new Error("timed out waiting for a generated image");
@@ -562,22 +601,55 @@ async function generateAndSave(geminiPage, sourcePath, outName, ext, outDir = co
     log(`  skip ${outName} — output exists`);
     return null;
   }
-  // The raw generated image is downloaded into generatedDir and KEPT, mirroring
-  // outDir's subdirectory layout under outputDir (e.g. output/<system> ->
-  // generated/<system>). Watermark removal + resize then writes to outPath.
+
   const genDir = path.join(config.generatedDir, path.relative(config.outputDir, outDir));
   await fs.mkdir(genDir, { recursive: true });
   const genBase = path.join(genDir, outName);
 
-  // Re-run the generation when Gemini reports a transient error and asks us to
-  // try again (a `.retry` error). Quota/skip errors propagate immediately.
   const maxAttempts = (config.generationRetries ?? 0) + 1;
   let genPath;
+  let fallbackTried = false;
+  let ultraFallbackTried = false;
+
+  const isPublicFigureRefusal = (err) => {
+    const phrase = String(err.phrase || err.message || "").toLowerCase();
+    return (
+      err.skip &&
+      (
+        phrase.includes("public figure") ||
+        phrase.includes("public figures") ||
+        phrase.includes("personnalités publiques")
+      )
+    );
+  };
+
   for (let attempt = 1; ; attempt++) {
     try {
-      genPath = await processOne(geminiPage, sourcePath, genBase);
+      genPath = await processOne(geminiPage, sourcePath, genBase, config.prompt);
       break;
     } catch (err) {
+      if (isPublicFigureRefusal(err) && !fallbackTried && config.fallbackPrompt) {
+        fallbackTried = true;
+        log("  ↳ public figure refusal detected — retrying once with fallback prompt…");
+        await sleep(config.timeouts.betweenImages);
+
+        try {
+          genPath = await processOne(geminiPage, sourcePath, genBase, config.fallbackPrompt);
+          break;
+        } catch (fallbackErr) {
+          if (isPublicFigureRefusal(fallbackErr) && !ultraFallbackTried && config.ultraFallbackPrompt) {
+            ultraFallbackTried = true;
+            log("  ↳ fallback refused too — retrying once without the source image…");
+            await sleep(config.timeouts.betweenImages);
+
+            const titleOnlyPrompt = config.ultraFallbackPrompt.replaceAll("{name}", outName);
+            genPath = await processTextOnly(geminiPage, titleOnlyPrompt, genBase);
+            break;
+          }
+          throw fallbackErr;
+        }
+      }
+
       if (err.retry && attempt < maxAttempts) {
         log(`  ⟳ ${err.message} — retry ${attempt}/${maxAttempts - 1}`);
         await sleep(config.timeouts.betweenImages);
@@ -586,6 +658,7 @@ async function generateAndSave(geminiPage, sourcePath, outName, ext, outDir = co
       throw err;
     }
   }
+
   log(`  ⬇ generated ${genPath}`);
   await saveOutput(genPath, outPath);
   log(`  ✓ saved ${outPath}`);

@@ -68,10 +68,45 @@ export const config = {
 
   // The same prompt sent with every image.
   prompt:
-    "Inspired by the attached picture, create an ultra-wide 3:1 banner fanart. " +
-    "Reserve the rightmost 5% of the width as a solid pure-black (#000000) " +
-    "vertical bar; the artwork must fill the remaining left portion edge to edge. " +
-    "No text, no japanese text, no game screens or arcade machines.",
+    "Use the attached box art as visual inspiration. Create a premium-quality cinematic ultra-wide 3:1 banner fanart suitable as a 1920x620 wallpaper. " +
+    "Think like a professional video game concept artist. Create a believable scene that could exist inside the game's world. " +
+    "Preserve the game's atmosphere, architecture, environment, colors, lighting, artistic style and mood while naturally expanding the universe beyond the original artwork. " +
+    "The environment must be the main subject of the image. Landscapes, buildings, ruins, vegetation, caves, castles, villages, interiors and scenery should occupy most of the composition. " +
+    "Characters should enhance the scene rather than dominate it. They must be naturally integrated into the environment, with realistic scale and believable distances between each other. " +
+    "Never group heroes, monsters and NPCs together unless it makes narrative sense. Each character should appear where they logically belong in the scene. " +
+    "If enemies are present, they should be positioned as if they were actually encountered in gameplay, with realistic spacing and depth. " +
+    "Use foreground, midground and background elements to create strong depth and cinematic perspective. " +
+    "Keep only one instance of each character or creature. Never duplicate, mirror or clone characters, enemies or objects. " +
+    "Avoid crowded foregrounds, repeated assets, impossible poses, distorted anatomy, stretched limbs, oversized heads or unrealistic perspectives. " +
+    "Create a natural composition that tells a story rather than displaying every important character at once. It is acceptable to omit secondary characters if it improves realism and composition. " +
+    "No text, logos, watermarks, user interface, screenshots or arcade cabinets. " +
+    "Reserve the rightmost 5% of the image as a solid pure black (#000000) vertical strip with no artwork, gradients or important content.",
+
+  // Used only when Gemini refuses the normal prompt because it thinks the box art
+  // contains a public figure. This fallback keeps the game's universe but avoids
+  // reproducing realistic faces, actors or cover poses.
+  fallbackPrompt:
+    "Use the attached box art only as a loose reference for the fictional game universe, atmosphere, architecture, creatures, colors and environment. " +
+    "Do not reproduce the cover illustration, composition, pose or facial features. " +
+    "If the cover contains a realistic human face, redesign it as an anonymous fictional adventurer, warrior or character with completely different facial features, seen from a distance, from behind, in silhouette, or with non-recognizable features. " +
+    "Do not depict, imitate or identify any real actor, celebrity, public figure or recognizable person. " +
+    "Focus mainly on the scenery, mood, world, lighting and atmosphere rather than human faces. " +
+    "Create a believable cinematic ultra-wide 3:1 banner fanart suitable as a 1920x620 wallpaper, with strong depth, realistic spacing and a coherent scene. " +
+    "No text, logos, watermarks, user interface, screenshots or arcade cabinets. " +
+    "Reserve the rightmost 5% of the image as a solid pure black (#000000) vertical strip with no artwork, gradients or important content.",
+
+
+  // Final fallback used only if Gemini still refuses the image-based fallback.
+  // No source image is attached. {name} is replaced by the current file/game name.
+  ultraFallbackPrompt:
+    "Create a premium-quality cinematic ultra-wide 3:1 banner fanart suitable as a 1920x620 wallpaper for a retro video game named {name}. " +
+    "Do not depict any real person, actor, athlete, celebrity or public figure. Do not create a portrait or recognizable face. " +
+    "Use a generic fictional game scene inspired only by the title and genre. " +
+    "Focus on the environment, atmosphere, scenery, lighting and mood rather than people. " +
+    "If the title suggests a sport, create a dramatic empty arena, ring, stadium, court or gameplay environment with anonymous distant silhouettes only if needed. " +
+    "If the title suggests fantasy, science fiction, horror, action or adventure, create a believable game-world environment with cinematic depth. " +
+    "No text, logos, watermarks, user interface, screenshots or arcade cabinets. " +
+    "Reserve the rightmost 5% of the image as a solid pure black (#000000) vertical strip with no artwork, gradients or important content.",
 
   // Output is always saved as JPEG at this quality, resized to width x height.
   resize: {
