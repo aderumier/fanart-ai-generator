@@ -1,6 +1,6 @@
 {
   "name": "geminibatch",
-  "version": "1.7.3",
+  "version": "1.7.5",
   "description": "Batch-process images through the Gemini web chat (browser automation, no API) and save the generated fanart.",
   "type": "module",
   "scripts": {
