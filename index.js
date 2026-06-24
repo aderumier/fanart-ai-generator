@@ -485,12 +485,18 @@ async function processTextOnly(page, promptText, genBase) {
 
   const box = page.locator(config.selectors.promptBox).first();
   await box.click();
-  await box.fill(promptText);
+  // Type with real keystrokes instead of fill(): with no image attached, Gemini's
+  // send button only enables once the Quill editor sees genuine input events, and
+  // a programmatic fill() can leave it disabled — so the prompt would never send
+  // and Enter would just add a newline (the run appears stuck on the prompt).
+  await box.pressSequentially(promptText);
 
   const baseline = await responseText(page);
 
+  // Wait for the send button to actually become enabled before clicking it.
   const sendBtn = page.locator(config.selectors.sendButton).first();
-  if (await sendBtn.count()) {
+  await sendBtn.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+  if (await sendBtn.isEnabled().catch(() => false)) {
     await sendBtn.click().catch(() => box.press("Enter"));
   } else {
     await box.press("Enter");
