@@ -86,12 +86,12 @@ export const config = {
   // contains a public figure. This fallback keeps the game's universe but avoids
   // reproducing realistic faces, actors or cover poses.
   fallbackPrompt:
-    "Use the attached box art only as a loose reference for the fictional game universe, atmosphere, architecture, creatures, colors and environment. " +
-    "Do not reproduce the cover illustration, composition, pose or facial features. " +
-    "If the cover contains a realistic human face, redesign it as an anonymous fictional adventurer, warrior or character with completely different facial features, seen from a distance, from behind, in silhouette, or with non-recognizable features. " +
-    "Do not depict, imitate or identify any real actor, celebrity, public figure or recognizable person. " +
-    "Focus mainly on the scenery, mood, world, lighting and atmosphere rather than human faces. " +
-    "Create a believable cinematic ultra-wide 3:1 banner fanart suitable as a 1920x620 wallpaper, with strong depth, realistic spacing and a coherent scene. " +
+    "Reproduce the attached box art as closely as possible: keep the SAME scene, setting and subjects, and the same composition, framing, pose, gesture, clothing, vehicles, props, colors, lighting, time of day, mood and artistic style. " +
+    "Keep exactly whatever the cover actually shows — for example a city street, cars, an interior, a sports field or a landscape. Do NOT replace it with a different, fantasy or generic game setting, and do not invent new surroundings. " +
+    "The only thing you must change is the identity of any human: this is an ORIGINAL illustration of a fictional character, NOT a depiction of any real, identifiable or recognizable person. " +
+    "Redraw each face as a new made-up character — adjust the facial features (face shape, hair, eyes, nose, jawline) just enough that it resembles no real actor, athlete, musician, celebrity or public figure — while keeping the same pose, expression, skin tone, outfit and position in the scene. " +
+    "Do not imitate, name or identify any real person. " +
+    "Extend the picture only at the left and right edges to fill a cinematic ultra-wide 3:1 banner suitable as a 1920x620 wallpaper, continuing the SAME environment naturally without adding unrelated elements. " +
     "No text, logos, watermarks, user interface, screenshots or arcade cabinets. " +
     "Reserve the rightmost 5% of the image as a solid pure black (#000000) vertical strip with no artwork, gradients or important content.",
 
