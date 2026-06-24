@@ -24,17 +24,17 @@ export const config = {
   // games; for each one missing fanart we grab its boxart, generate, and upload.
   // With no --system argument, the local inputDir above is used instead.
   contribute: {
-    baseUrl: "https://rgs-retro.ddns.net/contribute/system/",
+    baseUrl: "https://www.pixn-retro.com/contribute/system/",
     // API returning the games list for a system (system name is appended).
-    apiUrl: "https://rgs-retro.ddns.net/api/catalog/contribute/games/",
+    apiUrl: "https://www.pixn-retro.com/api/catalog/contribute/games/",
     // Base for media paths from the API (e.g. boxart "dos/media/box2d/x.jpg").
     // Leave "" to auto-detect by probing a few common bases.
     mediaBaseUrl: "",
     // Endpoint that accepts the generated fanart (multipart upload).
-    uploadUrl: "https://rgs-retro.ddns.net/api/media/upload",
+    uploadUrl: "https://www.pixn-retro.com/api/media/upload",
     // Endpoint listing already-uploaded (pending-review) media, so we can skip
     // games we already uploaded fanart for on a previous run.
-    pendingUrl: "https://rgs-retro.ddns.net/api/media/pending",
+    pendingUrl: "https://www.pixn-retro.com/api/media/pending",
     // Only process games whose fanart is missing (skip ones that already have it).
     onlyMissingFanart: true,
     // Max number of games to process in one run (0 = no limit). Handy for testing.
