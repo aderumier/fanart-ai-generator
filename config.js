@@ -68,18 +68,11 @@ export const config = {
 
   // The same prompt sent with every image.
   prompt:
-    "Use the attached box art as visual inspiration. Create a premium-quality cinematic ultra-wide 3:1 banner fanart suitable as a 1920x620 wallpaper. " +
-    "Think like a professional video game concept artist. Create a believable scene that could exist inside the game's world. " +
+    "Inspired by the attached picture, create an ultra-wide 3:1 banner fanart. " +
     "Preserve the game's atmosphere, architecture, environment, colors, lighting, artistic style and mood while naturally expanding the universe beyond the original artwork. " +
-    "The environment must be the main subject of the image. Landscapes, buildings, ruins, vegetation, caves, castles, villages, interiors and scenery should occupy most of the composition. " +
-    "Characters should enhance the scene rather than dominate it. They must be naturally integrated into the environment, with realistic scale and believable distances between each other. " +
-    "Never group heroes, monsters and NPCs together unless it makes narrative sense. Each character should appear where they logically belong in the scene. " +
-    "If enemies are present, they should be positioned as if they were actually encountered in gameplay, with realistic spacing and depth. " +
-    "Use foreground, midground and background elements to create strong depth and cinematic perspective. " +
+    "No pixelart rendering." +
     "Keep only one instance of each character or creature. Never duplicate, mirror or clone characters, enemies or objects. " +
-    "Avoid crowded foregrounds, repeated assets, impossible poses, distorted anatomy, stretched limbs, oversized heads or unrealistic perspectives. " +
-    "Create a natural composition that tells a story rather than displaying every important character at once. It is acceptable to omit secondary characters if it improves realism and composition. " +
-    "No text, logos, watermarks, user interface, screenshots or arcade cabinets. " +
+    "No text, no japanase text, no logos, no watermarks, no user interface, no screenshots, no arcade cabinets. " +
     "Reserve the rightmost 5% of the image as a solid pure black (#000000) vertical strip with no artwork, gradients or important content.",
 
   // Used only when Gemini refuses the normal prompt because it thinks the box art
