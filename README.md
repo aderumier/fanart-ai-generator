@@ -140,7 +140,8 @@ run.bat --system dos --startletter A-F
 
 Flags: `--system <name>` / `-s <name>`, `--limit <n>` / `-l <n>` (0 = no limit),
 `--directory <dir>` / `-d <dir>`, `--field <name>` / `-f <name>`,
-`--startletter <letter|range>`, `--port <n>` / `-p <n>`.
+`--startletter <letter|range>`, `--port <n>` / `-p <n>`,
+`--ports <n,n,…>` (drive several browsers in parallel — see below).
 
 `--field` chooses which API field is used as the source image instead of the
 default boxart (e.g. `image`, `screenshot`). It still falls back to boxart/image
@@ -159,31 +160,39 @@ leading articles to the end, so *"The Legend of Kage"* is filed under **L**
 (`Legend of Kage, The`), not T. Handy for generating a big system in alphabetical
 batches across several runs. Also settable via `contribute.startLetter`.
 
-`--port` picks which Chrome debug port to attach to (default `9222`), so you can
-run more than one instance at once — see below.
+`--port` picks which Chrome debug port to attach to (default `9222`). To drive
+several browsers at once from a single run, use `--ports` instead — see below.
 
-### Two instances in parallel
+### Several browsers in parallel
 
-The daily image quota is **per Google account**, so you can roughly double
-throughput by running two instances against two accounts. Start a second Chrome on
-another port (it gets its own profile/login), then run each instance on its port —
-and **split the work** with `--startletter` (or `--directory`) so they don't both
-generate the same games:
+The daily image quota is **per Google account**, so you can multiply throughput
+by running across several accounts. Start one Chrome per account (each on its own
+debug port, so each gets its own profile/login), then give them all to a **single
+run** with `--ports`. The run builds the work queue once and **dispatches it
+across the browsers** — each image/game is handled by exactly one browser, so no
+manual `--startletter`/`--directory` partitioning is needed and nothing is done
+twice:
 
 ```bash
 # Terminal 1 + 2: two Chromes, two separate Gemini logins
 bash start-chrome.sh 9222        # profile ./.gemini-chrome      → account A
 bash start-chrome.sh 9223        # profile ./.gemini-chrome-9223 → account B
 
-# Terminal 3 + 4: one run per port, each handling half the alphabet
-./run.sh --system dos --port 9222 --startletter A-M
-./run.sh --system dos --port 9223 --startletter N-Z
+# Terminal 3: one run drives BOTH browsers, queue split automatically
+./run.sh --system dos --ports 9222,9223
 ```
 
-On Windows use `start-chrome.bat 9223` and `run.bat --system dos --port 9223 …`;
-pass a 2nd argument to either launcher to choose the profile dir explicitly. Two
-instances on the **same** account just share one quota, so partitioning only pays
-off across different accounts.
+Add more accounts by listing more ports (`--ports 9222,9223,9224`). Each browser
+must be logged into Gemini, and — for system mode — also into the contribute site
+(it downloads boxart and uploads fanart with that profile's cookies). Per-browser
+log lines are tagged with their port, e.g. `[:9223]`. If one account hits its
+daily quota (with `quotaWait` disabled) that browser stops, but the others keep
+draining the queue.
+
+On the **same** account all ports share one quota, so this mainly overlaps the
+upload/processing waits rather than multiplying quota. On Windows use
+`start-chrome.bat 9223` and `run.bat --system dos --ports 9222,9223`; pass a 2nd
+argument to either launcher to choose the profile dir explicitly.
 
 Results: local mode → `output/<name>.jpg`; system mode → `output/<system>/<name>.jpg`.
 The raw image Gemini produced is also kept in `generated/` (mirroring the output

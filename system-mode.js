@@ -8,6 +8,21 @@ import path from "node:path";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(`[${new Date().toLocaleTimeString()}]`, ...a);
 
+// A trivial shared work queue: each worker pulls the next item; returns the
+// 0-based original index alongside the value (for stable "(i/total)" logging).
+// Safe across concurrent workers because next() does no awaiting.
+function makeQueue(items) {
+  let i = 0;
+  return {
+    total: items.length,
+    next() {
+      if (i >= items.length) return null;
+      const index = i++;
+      return { value: items[index], index };
+    },
+  };
+}
+
 const siteOrigin = () => new URL(config.contribute.apiUrl).origin;
 
 // Which API field to generate the fanart from. By default boxart, then image;
@@ -90,6 +105,14 @@ async function recordRefused(system, entry) {
   const file = refusedFilePath(system);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(list, null, 2));
+}
+
+// Serialize refusal-file writes so concurrent workers (parallel browsers) doing
+// read-modify-write on the same _refused.json don't clobber each other's entry.
+let refusalChain = Promise.resolve();
+function recordRefusedSerial(system, entry) {
+  refusalChain = refusalChain.then(() => recordRefused(system, entry)).catch(() => {});
+  return refusalChain;
 }
 
 // Open / reuse a tab on the site and land on the system page (ensures we're on
@@ -206,14 +229,21 @@ async function downloadToFile(page, url, destPath) {
 }
 
 export async function runSystemMode({
-  browser,
-  geminiPage,
+  workers,
   system,
   generateAndSave,
   outputAlreadyExists,
 }) {
+  const multi = workers.length > 1;
   log(`System mode: ${system}`);
-  const page = await openContributePage(browser, system);
+
+  // Give every browser its own contribute-site tab: each Chrome profile carries
+  // its own login cookies, used to download boxart and upload fanart.
+  for (const w of workers) {
+    w.contributePage = await openContributePage(w.browser, system);
+  }
+  // The one-off list/probe fetches run on the first browser's tab.
+  const page = workers[0].contributePage;
 
   const apiUrl = config.contribute.apiUrl.replace(/\/$/, "") + "/" + system;
   const games = await fetchGamesWhenReady(page, apiUrl);
@@ -276,75 +306,91 @@ export async function runSystemMode({
   await fs.mkdir(outDir, { recursive: true });
   await fs.mkdir(config.tmpDir, { recursive: true });
 
-  let ok = 0;
-  let failed = 0;
-  let stop = false;
-  for (const [i, g] of todo.entries()) {
+  const queue = makeQueue(todo);
+  const ctx = { system, mediaBase, outDir, generateAndSave, outputAlreadyExists };
+  const stats = { ok: 0, failed: 0 };
+  if (multi) log(`Dispatching ${todo.length} game(s) across ${workers.length} browsers.`);
+  await Promise.all(workers.map((w) => systemWorker(w, queue, ctx, stats)));
+  log(`Done. ${stats.ok} succeeded, ${stats.failed} failed.`);
+}
+
+// One worker drains the shared queue on its own browser, using its own
+// contribute-site tab for download/upload and its own Gemini page for
+// generation. A hard quota stops ONLY this worker (each browser is a separate
+// account); the others keep draining the queue.
+async function systemWorker(worker, queue, ctx, stats) {
+  const { tag = "", geminiPage, contributePage } = worker;
+  const { system, mediaBase, outDir, generateAndSave, outputAlreadyExists } = ctx;
+  for (;;) {
+    const item = queue.next();
+    if (!item) break;
+    const g = item.value;
     const field = sourceFieldFor(g); // which API field we're sourcing from
     const src = sourceMedia(g);
     const ext = path.extname(src) || ".jpg";
     const outName = path.basename(src, ext); // matches media naming
-    log(`(${i + 1}/${todo.length}) ${g.name}  [${outName}]${field === "boxart" ? "" : ` (${field})`}`);
+    log(`${tag}(${item.index + 1}/${queue.total}) ${g.name}  [${outName}]${field === "boxart" ? "" : ` (${field})`}`);
 
     // Already generated on a previous run — skip BEFORE downloading the boxart or
     // waiting out the pacing delay below (so re-runs over a done system fly past).
     if (await outputAlreadyExists(outName, ext, outDir)) {
-      log(`  skip ${outName} — output exists`);
-      ok++;
+      log(`${tag}  skip ${outName} — output exists`);
+      stats.ok++;
       continue;
     }
 
-    const boxTmp = path.join(config.tmpDir, `${outName}.boxart${ext}`);
+    // Per-worker temp file so parallel browsers never collide on the same path.
+    const boxTmp = path.join(config.tmpDir, `${worker.port}.${outName}.boxart${ext}`);
+    let stop = false;
     // Retry the SAME game while we keep hitting the quota, pausing quotaWait each
     // time. Any other outcome leaves this inner loop after one attempt.
     for (;;) {
       try {
-        await downloadToFile(page, mediaBase + encodeURI(src), boxTmp);
+        await downloadToFile(contributePage, mediaBase + encodeURI(src), boxTmp);
         // null = generation was skipped because the output already existed; don't
         // re-upload it (avoids re-uploading media we generated on a previous run).
         const outPath = await generateAndSave(geminiPage, boxTmp, outName, ext, outDir);
         if (outPath && config.contribute.autoUpload) {
-          await uploadFanart(page, {
+          await uploadFanart(contributePage, {
             filePath: outPath,
             filename: path.basename(outPath),
             system,
             gameId: g.id,
           });
-          log("  ⬆ uploaded fanart");
+          log(`${tag}  ⬆ uploaded fanart`);
         }
-        ok++;
+        stats.ok++;
       } catch (err) {
         if (err.quota) {
           if (config.quotaWait > 0) {
             // `finally` removes boxTmp before we wait; it's re-downloaded on retry.
             const mins = Math.round(config.quotaWait / 60000);
-            log(`  ⛔ ${err.message} — waiting ${mins} min, then retrying (quota).`);
+            log(`${tag}  ⛔ ${err.message} — waiting ${mins} min, then retrying (quota).`);
             await sleep(config.quotaWait);
             continue; // re-run this same game
           }
           // `finally` below still removes boxTmp before we leave the loop.
-          log(`  ⛔ ${err.message} — stopping (daily quota reached).`);
+          log(`${tag}  ⛔ ${err.message} — this browser stops (daily quota reached).`);
           stop = true;
         } else {
           if (err.skip && config.rememberRefusals) {
-            await recordRefused(system, {
+            await recordRefusedSerial(system, {
               id: g.id,
               name: g.name,
               phrase: err.phrase,
               at: new Date().toISOString(),
             }).catch(() => {});
-            log("  ↷ remembered refusal — will skip this game on future runs.");
+            log(`${tag}  ↷ remembered refusal — will skip this game on future runs.`);
           }
-          log(`  ✗ failed ${outName}: ${err.message}`);
-          failed++;
+          log(`${tag}  ✗ failed ${outName}: ${err.message}`);
+          stats.failed++;
         }
       } finally {
         await fs.rm(boxTmp, { force: true }).catch(() => {});
       }
       break;
     }
-    if (stop) break;
-    if (i < todo.length - 1) await sleep(config.timeouts.betweenImages);
+    if (stop) break; // only this worker stops; the others drain the rest
+    await sleep(config.timeouts.betweenImages);
   }
-  log(`Done. ${ok} succeeded, ${failed} failed.`);
 }

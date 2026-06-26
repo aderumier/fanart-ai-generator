@@ -65,7 +65,7 @@ function parseSystemArg(args) {
   // Bare positional, but skip a value that belongs to another flag (e.g. --limit 10).
   const valueFlags = new Set([
     "--system", "-s", "--limit", "-l", "--directory", "-d", "--field", "-f",
-    "--startletter", "--port", "-p",
+    "--startletter", "--port", "-p", "--ports",
   ]);
   const positional = args.find((a, i) => !a.startsWith("-") && !valueFlags.has(args[i - 1]));
   return positional || null;
@@ -126,19 +126,36 @@ function parseStartLetterArg(args) {
 const STARTLETTER = parseStartLetterArg(process.argv.slice(2));
 if (STARTLETTER !== null) config.contribute.startLetter = STARTLETTER;
 
-// --port <n> (or -p <n>, --port=<n>): the Chrome DevTools debugging port to
-// attach to. Run several instances against different Chrome sessions, each
-// started with `./start-chrome.sh <port>`. Overrides config.cdpPort.
-function parsePortArg(args) {
+// --port / --ports: the Chrome DevTools debugging port(s) to attach to. Each
+// port is a separate Chrome session started with `./start-chrome.sh <port>`
+// (its own profile, so its own Gemini/Discord login). Accepts:
+//   --port 9222            single port (overrides config.cdpPort)
+//   -p 9222 -p 9223        repeated flag → several browsers
+//   --ports 9222,9223      comma-separated list → several browsers
+// With more than one port, the work queue is built ONCE and dispatched across
+// all the browsers in parallel (each item handled by exactly one browser).
+function parsePortsArg(args) {
+  const ports = [];
+  const add = (v) => {
+    String(v)
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n))
+      .forEach((n) => ports.push(n));
+  };
   for (let i = 0; i < args.length; i++) {
-    if ((args[i] === "--port" || args[i] === "-p") && args[i + 1] !== undefined)
-      return Number(args[i + 1]);
-    if (args[i].startsWith("--port=")) return Number(args[i].slice("--port=".length));
+    if ((args[i] === "--port" || args[i] === "-p" || args[i] === "--ports") && args[i + 1] !== undefined)
+      add(args[++i]);
+    else if (args[i].startsWith("--port=")) add(args[i].slice("--port=".length));
+    else if (args[i].startsWith("--ports=")) add(args[i].slice("--ports=".length));
   }
-  return null;
+  // De-duplicate while preserving order.
+  return [...new Set(ports)];
 }
-const PORT = parsePortArg(process.argv.slice(2));
-if (PORT !== null && Number.isFinite(PORT)) config.cdpPort = PORT;
+const PORTS = parsePortsArg(process.argv.slice(2));
+if (PORTS.length === 1) config.cdpPort = PORTS[0];
+// The list of ports to drive: explicit --ports/--port(s), or the single config one.
+const RUN_PORTS = PORTS.length ? PORTS : [config.cdpPort];
 
 
 async function listInputImages() {
@@ -513,37 +530,53 @@ async function processTextOnly(page, promptText, genBase) {
   return downloadGenerated(page, genBase);
 }
 
-// Attach to the real Chrome you launched with `npm run chrome`.
-async function connectChrome() {
-  let browser;
-  const cdpUrl = `http://${config.cdpHost}:${config.cdpPort}`;
+// Attach to a real Chrome you launched with `./start-chrome.sh <port>`.
+async function connectChrome(port = config.cdpPort) {
+  const cdpUrl = `http://${config.cdpHost}:${port}`;
   try {
-    browser = await chromium.connectOverCDP(cdpUrl);
+    return await chromium.connectOverCDP(cdpUrl);
   } catch (err) {
     log(`Could not connect to Chrome at ${cdpUrl}`);
     log(`reason: ${err.message}`);
-    log("Start it first in another terminal:  npm run chrome");
+    log(`Start it first in another terminal:  ./start-chrome.sh ${port}`);
     process.exit(1);
   }
-  // Ctrl+C disconnects (leaves YOUR Chrome open and running) and exits Node.
-  // Disconnecting from a CDP connection can hang, which would otherwise leave
-  // the process alive after Ctrl+C — so force-exit if cleanup takes too long,
-  // and exit immediately on a second Ctrl+C.
+}
+
+// Install ONE Ctrl+C/TERM handler that disconnects from every browser (leaves
+// YOUR Chrome windows open and running) and exits Node. Disconnecting from a CDP
+// connection can hang, which would otherwise leave the process alive after
+// Ctrl+C — so force-exit if cleanup takes too long, and exit immediately on a
+// second Ctrl+C.
+function installShutdown(browsers) {
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) process.exit(130); // second Ctrl+C: don't wait
     shuttingDown = true;
     const force = setTimeout(() => process.exit(130), 3000);
     force.unref();
-    try {
-      await browser.close();
-    } catch {}
+    await Promise.all(browsers.map((b) => b.close().catch(() => {})));
     clearTimeout(force);
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
-  return browser;
+}
+
+// A trivial shared work queue: each worker pulls the next item; returns the
+// 0-based original index alongside the value (for stable "(i/total)" logging).
+// Safe across concurrent workers because next() does no awaiting — Node runs it
+// to completion before another worker's call.
+function makeQueue(items) {
+  let i = 0;
+  return {
+    total: items.length,
+    next() {
+      if (i >= items.length) return null;
+      const index = i++;
+      return { value: items[index], index };
+    },
+  };
 }
 
 // Find/open the Gemini tab and make sure we're logged in.
@@ -668,76 +701,102 @@ async function generateAndSave(geminiPage, sourcePath, outName, ext, outDir = co
 }
 
 // ---- Mode 1: local images directory (the original behaviour) ----
-async function runLocalMode(geminiPage) {
-  const images = await listInputImages();
-  if (images.length === 0) {
-    log(`No images found in ${config.inputDir}. Drop some in and re-run.`);
-    return;
-  }
-  log(`Found ${images.length} image(s) to process.`);
-
-  let ok = 0;
-  let failed = 0;
-  let stop = false;
-  for (const [i, imgPath] of images.entries()) {
+// One worker drains the shared queue on its own browser. Other workers keep
+// going if this one hits a hard quota (each browser is a separate account).
+async function localWorker(worker, queue, stats) {
+  const { tag, geminiPage } = worker;
+  for (;;) {
+    const item = queue.next();
+    if (!item) break;
+    const imgPath = item.value;
     const { name, ext } = path.parse(imgPath);
-    log(`(${i + 1}/${images.length}) processing ${name}`);
+    log(`${tag}(${item.index + 1}/${queue.total}) processing ${name}`);
     // Already done on a previous run — skip without the pacing delay below.
     if (await outputAlreadyExists(name, ext)) {
-      log(`  skip ${name} — output exists`);
-      ok++;
+      log(`${tag}  skip ${name} — output exists`);
+      stats.ok++;
       continue;
     }
+    let stop = false;
     // Retry the SAME image while we keep hitting the quota, pausing quotaWait
     // each time. Any other outcome leaves this inner loop after one attempt.
     for (;;) {
       try {
         await generateAndSave(geminiPage, imgPath, name, ext);
-        ok++;
+        stats.ok++;
       } catch (err) {
         if (err.quota) {
           if (config.quotaWait > 0) {
             const mins = Math.round(config.quotaWait / 60000);
-            log(`  ⛔ ${err.message} — waiting ${mins} min, then retrying (quota).`);
+            log(`${tag}  ⛔ ${err.message} — waiting ${mins} min, then retrying (quota).`);
             await sleep(config.quotaWait);
             continue; // re-run this same image
           }
-          log(`  ⛔ ${err.message} — stopping (daily quota reached).`);
+          log(`${tag}  ⛔ ${err.message} — this browser stops (daily quota reached).`);
           stop = true;
         } else {
-          log(`  ✗ failed ${name}: ${err.message}`);
-          failed++;
+          log(`${tag}  ✗ failed ${name}: ${err.message}`);
+          stats.failed++;
         }
       }
       break;
     }
-    if (stop) break;
-    if (i < images.length - 1) await sleep(config.timeouts.betweenImages);
+    if (stop) break; // only this worker stops; the others drain the rest
+    await sleep(config.timeouts.betweenImages);
   }
-  log(`Done. ${ok} succeeded, ${failed} failed.`);
+}
+
+async function runLocalMode(workers) {
+  const images = await listInputImages();
+  if (images.length === 0) {
+    log(`No images found in ${config.inputDir}. Drop some in and re-run.`);
+    return;
+  }
+  log(
+    `Found ${images.length} image(s) to process` +
+      (workers.length > 1 ? ` across ${workers.length} browsers.` : ".")
+  );
+
+  const queue = makeQueue(images);
+  const stats = { ok: 0, failed: 0 };
+  await Promise.all(workers.map((w) => localWorker(w, queue, stats)));
+  log(`Done. ${stats.ok} succeeded, ${stats.failed} failed.`);
 }
 
 async function main() {
   await fs.mkdir(config.outputDir, { recursive: true });
   await fs.mkdir(config.inputDir, { recursive: true });
 
-  const browser = await connectChrome();
-  const geminiPage = await openGeminiPage(browser);
+  const multi = RUN_PORTS.length > 1;
+  if (multi) log(`Driving ${RUN_PORTS.length} browsers in parallel: ports ${RUN_PORTS.join(", ")}.`);
+
+  // Connect to every Chrome and prepare a logged-in Gemini page on each. A worker
+  // is one browser + its page(s); the run dispatches the queue across all of them.
+  const browsers = [];
+  const workers = [];
+  for (const port of RUN_PORTS) {
+    const tag = multi ? `[:${port}] ` : "";
+    if (multi) log(`${tag}connecting…`);
+    const browser = await connectChrome(port);
+    browsers.push(browser);
+    const geminiPage = await openGeminiPage(browser);
+    workers.push({ port, tag, browser, geminiPage });
+  }
+  installShutdown(browsers);
 
   if (SYSTEM) {
     const { runSystemMode } = await import("./system-mode.js");
     await runSystemMode({
-      browser,
-      geminiPage,
+      workers,
       system: SYSTEM,
       generateAndSave,
       outputAlreadyExists,
     });
   } else {
-    await runLocalMode(geminiPage);
+    await runLocalMode(workers);
   }
 
-  await browser.close();
+  await Promise.all(browsers.map((b) => b.close().catch(() => {})));
 }
 
 main().catch((e) => {
